@@ -1,0 +1,6 @@
+{
+  "name": "KIA Project Suite",
+  "description": "Portfólio de Projetos (PPM) Inteligente com Alocação de Recursos, Cronograma Gantt, Kanban Gerencial e Dashboard Executivo para Diretoria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

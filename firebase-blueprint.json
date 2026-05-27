@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "colaborador": {
+      "title": "Colaborador",
+      "description": "Dados do colaborador do banco de talentos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "papel": { "type": "string" },
+        "custoHora": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nome", "papel", "userId"]
+    },
+    "projeto": {
+      "title": "Projeto",
+      "description": "Dados principais de um projeto do portfólio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "descricao": { "type": "string" },
+        "dataInicio": { "type": "string" },
+        "dataFim": { "type": "string" },
+        "estagio": { "type": "string" },
+        "progressoManual": { "type": "number" },
+        "userId": { "type": "string" },
+        "gpEmail": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nome", "dataInicio", "dataFim", "estagio", "userId"]
+    },
+    "alocacao": {
+      "title": "Alocação",
+      "description": "Relação de alocação de um colaborador a um projeto com dedicação percentual",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "colaboradorId": { "type": "string" },
+        "colaboradorNome": { "type": "string" },
+        "colaboradorPapel": { "type": "string" },
+        "projectId": { "type": "string" },
+        "projectNome": { "type": "string" },
+        "percentualDedication": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["colaboradorId", "projectId", "percentualDedication", "userId"]
+    },
+    "cicloInput": {
+      "title": "Ciclo Input",
+      "description": "Registros históricos de evolução financeira e ágil de um projeto",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "dataReferencia": { "type": "string" },
+        "financeiro": {
+          "type": "object"
+        },
+        "progresso": { "type": "number" },
+        "pontosPlanejados": { "type": "number" },
+        "pontosEntregues": { "type": "number" },
+        "bugs": { "type": "number" },
+        "horasPrevistas": { "type": "number" },
+        "horasGastas": { "type": "number" },
+        "entregasCount": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nome", "dataReferencia", "userId"]
+    },
+    "marco": {
+      "title": "Marco",
+      "description": "Milestone crítico do projeto com data limite",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "dataLimite": { "type": "string" },
+        "concluido": { "type": "boolean" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nome", "dataLimite", "concluido", "userId"]
+    }
+  },
+  "firestore": {
+    "colaboradores/{colaboradorId}": {
+      "schema": "colaborador",
+      "description": "Banco de talentos do gerente de projetos"
+    },
+    "projetos/{projectId}": {
+      "schema": "projeto",
+      "description": "Cadastro principal de projetos"
+    },
+    "projetos/{projectId}/ciclos/{cicloId}": {
+      "schema": "cicloInput",
+      "description": "Evolução do projeto por ciclo (fim de Sprint ou mês)"
+    },
+    "projetos/{projectId}/marcos/{marcoId}": {
+      "schema": "marco",
+      "description": "Marcos específicos do projeto"
+    },
+    "alocacoes/{alocacaoId}": {
+      "schema": "alocacao",
+      "description": "Matriz de alocação de recursos em projetos"
+    }
+  }
+}
