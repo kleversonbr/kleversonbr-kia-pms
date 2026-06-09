@@ -99,7 +99,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
     if (projects.length === 0) return;
 
     const unsubscribesCycles = projects.map((p) => {
-      const q = collection(db, "projetos", p.id, "ciclos");
+      const q = query(collection(db, "projetos", p.id, "ciclos"), where("userId", "==", userId));
       return onSnapshot(
         q,
         (snapshot) => {
@@ -116,7 +116,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
     });
 
     const unsubscribesMilestones = projects.map((p) => {
-      const q = collection(db, "projetos", p.id, "marcos");
+      const q = query(collection(db, "projetos", p.id, "marcos"), where("userId", "==", userId));
       return onSnapshot(
         q,
         (snapshot) => {
@@ -136,7 +136,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
       unsubscribesCycles.forEach((unsub) => unsub());
       unsubscribesMilestones.forEach((unsub) => unsub());
     };
-  }, [projects]);
+  }, [projects, userId]);
 
   // ----------------------------------------------------
   // FILTERED VIEW CALCULATIONS / INTEGRATED PORTFOLIO FILTERS

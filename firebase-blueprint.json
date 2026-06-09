@@ -106,6 +106,23 @@
         "createdAt": { "type": "string" }
       },
       "required": ["nome", "dataLimite", "concluido", "userId"]
+    },
+    "risco": {
+      "title": "Risco",
+      "description": "Registro de risco vinculado a um projeto",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "descricao": { "type": "string" },
+        "numIssue": { "type": "string" },
+        "impacto": { "type": "string", "enum": ["Baixo", "Médio", "Alto", "Crítico", "Impeditivo"] },
+        "status": { "type": "string", "enum": ["Análise", "Pendente", "Bloqueio", "Mitigado", "Cancelado", "Concluído"] },
+        "dataStatus": { "type": "string" },
+        "responsavel": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["descricao", "impacto", "status", "dataStatus", "userId"]
     }
   },
   "firestore": {
@@ -128,6 +145,10 @@
     "projetos/{projectId}/marcos/{marcoId}": {
       "schema": "marco",
       "description": "Marcos específicos do projeto"
+    },
+    "projetos/{projectId}/riscos/{riscoId}": {
+      "schema": "risco",
+      "description": "Riscos específicos do projeto"
     },
     "alocacoes/{alocacaoId}": {
       "schema": "alocacao",

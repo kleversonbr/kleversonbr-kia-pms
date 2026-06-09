@@ -93,7 +93,7 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
     if (projects.length === 0) return;
 
     const unsubscribes = projects.map((p) => {
-      const q = collection(db, "projetos", p.id, "marcos");
+      const q = query(collection(db, "projetos", p.id, "marcos"), where("userId", "==", userId));
       return onSnapshot(
         q,
         (snapshot) => {
@@ -110,7 +110,7 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
           }));
         },
         (error) => {
-          console.warn(`Transient snap validation in control-view marcos for ${p.id}:`, error);
+           console.warn(`Transient snap validation in control-view marcos for ${p.id}:`, error);
         }
       );
     });
@@ -118,12 +118,12 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
     return () => {
       unsubscribes.forEach((unsub) => unsub());
     };
-  }, [projects]);
+  }, [projects, userId]);
 
   const recalculateProjectProgress = async (projectId: string) => {
     try {
-      const milestonesSnap = await getDocs(collection(db, "projetos", projectId, "marcos"));
-      const cyclesSnap = await getDocs(collection(db, "projetos", projectId, "ciclos"));
+      const milestonesSnap = await getDocs(query(collection(db, "projetos", projectId, "marcos"), where("userId", "==", userId)));
+      const cyclesSnap = await getDocs(query(collection(db, "projetos", projectId, "ciclos"), where("userId", "==", userId)));
 
       let percent = 0;
 

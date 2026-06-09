@@ -94,3 +94,16 @@ export interface Notificacao {
   tipo: "info" | "warning" | "success" | "error";
   data: string;
 }
+
+export interface Risco {
+  id: string;
+  descricao: string;
+  numIssue: string;
+  impacto: "Baixo" | "Médio" | "Alto" | "Crítico" | "Impeditivo";
+  status: "Análise" | "Pendente" | "Bloqueio" | "Mitigado" | "Cancelado" | "Concluído";
+  dataStatus: string; // YYYY-MM-DD
+  responsavel: string;
+  userId: string;
+  createdAt: string;
+}
+

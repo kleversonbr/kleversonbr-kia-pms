@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus, Users, Layers } from "lucide-react";
+import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus, Users, Layers, ShieldAlert } from "lucide-react";
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebaseInit";
-import { Projeto, CicloInput, Marco, Alocacao, Squad } from "../types";
+import { Projeto, CicloInput, Marco, Alocacao, Squad, Risco } from "../types";
 import { useNotifications } from "./NotificationToast";
 import { calculateExpectedProgress, getRAGDetails } from "./ControlViews";
 import { getSquadColorClasses } from "../utils/squadColors";
@@ -17,7 +17,7 @@ interface ProjectsAdminProps {
 export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail, filterSquadId = "", filterProjectId = "" }) => {
   const [projects, setProjects] = useState<Projeto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"cadastros" | "ciclos" | "marcos">("cadastros");
+  const [activeTab, setActiveTab] = useState<"cadastros" | "ciclos" | "marcos" | "riscos">("cadastros");
   const { addNotification } = useNotifications();
 
   // Filtered project list based on selected portfolio filters
@@ -55,7 +55,17 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
   // Active Project Data
   const [projectCycles, setProjectCycles] = useState<CicloInput[]>([]);
   const [projectMilestones, setProjectMilestones] = useState<Marco[]>([]);
+  const [projectRisks, setProjectRisks] = useState<Risco[]>([]);
   const [allocations, setAllocations] = useState<Alocacao[]>([]);
+
+  // Risk Input State
+  const [riskDesc, setRiskDesc] = useState("");
+  const [riskIssue, setRiskIssue] = useState("");
+  const [riskImpact, setRiskImpact] = useState<"Baixo" | "Médio" | "Alto" | "Crítico" | "Impeditivo">("Médio");
+  const [riskStatus, setRiskStatus] = useState<"Análise" | "Pendente" | "Bloqueio" | "Mitigado" | "Cancelado" | "Concluído">("Análise");
+  const [riskStatusDate, setRiskStatusDate] = useState(new Date().toISOString().split("T")[0]);
+  const [riskOwner, setRiskOwner] = useState("");
+  const [editingRiskId, setEditingRiskId] = useState<string | null>(null);
 
   // Cycle Input State
   const [cyNome, setCyNome] = useState("");
@@ -145,16 +155,17 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     return () => unsubscribe();
   }, [userId]);
 
-  // Load details (Cycles and Milestones) for the selected project
+  // Load details (Cycles, Milestones and Risks) for the selected project
   useEffect(() => {
     if (!selectedProjectId) {
       setProjectCycles([]);
       setProjectMilestones([]);
+      setProjectRisks([]);
       return;
     }
 
     // Cycles snapshot
-    const cyclesQuery = collection(db, "projetos", selectedProjectId, "ciclos");
+    const cyclesQuery = query(collection(db, "projetos", selectedProjectId, "ciclos"), where("userId", "==", userId));
     const unsubscribeCycles = onSnapshot(
       cyclesQuery,
       (snapshot) => {
@@ -172,7 +183,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     );
 
     // Milestones snapshot
-    const milestonesQuery = collection(db, "projetos", selectedProjectId, "marcos");
+    const milestonesQuery = query(collection(db, "projetos", selectedProjectId, "marcos"), where("userId", "==", userId));
     const unsubscribeMilestones = onSnapshot(
       milestonesQuery,
       (snapshot) => {
@@ -189,9 +200,28 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
       }
     );
 
+    // Risks snapshot
+    const risksQuery = query(collection(db, "projetos", selectedProjectId, "riscos"), where("userId", "==", userId));
+    const unsubscribeRisks = onSnapshot(
+      risksQuery,
+      (snapshot) => {
+        const list: Risco[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Risco);
+        });
+        // Sort chronologically by createdAt descending
+        list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        setProjectRisks(list);
+      },
+      (error) => {
+        console.error("Erro listando riscos:", error);
+      }
+    );
+
     return () => {
       unsubscribeCycles();
       unsubscribeMilestones();
+      unsubscribeRisks();
     };
   }, [selectedProjectId]);
 
@@ -480,6 +510,124 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
       await recalculateProjectProgress(selectedProjectId);
     } catch (err) {
       console.error("Erro ao apagar marco:", err);
+    }
+  };
+
+  // Submit or Edit Risk (Risco)
+  const handleSubmitRisk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProjectId || !riskDesc.trim() || !riskImpact || !riskStatus || !riskStatusDate) return;
+
+    try {
+      if (editingRiskId) {
+        // Edit Mode
+        await updateDoc(doc(db, "projetos", selectedProjectId, "riscos", editingRiskId), {
+          descricao: riskDesc,
+          numIssue: riskIssue,
+          impacto: riskImpact,
+          status: riskStatus,
+          dataStatus: riskStatusDate,
+          responsavel: riskOwner,
+        });
+
+        addNotification("Risco Atualizado 🛡️", `O risco foi atualizado com sucesso.`, "success");
+        setEditingRiskId(null);
+      } else {
+        // Create Mode
+        await addDoc(collection(db, "projetos", selectedProjectId, "riscos"), {
+          descricao: riskDesc,
+          numIssue: riskIssue,
+          impacto: riskImpact,
+          status: riskStatus,
+          dataStatus: riskStatusDate,
+          responsavel: riskOwner,
+          userId,
+          createdAt: new Date().toISOString(),
+        });
+
+        addNotification("Risco Adicionado 🛡️", `O risco foi registrado com sucesso no projeto.`, "success");
+      }
+
+      // Reset form states
+      setRiskDesc("");
+      setRiskIssue("");
+      setRiskImpact("Médio");
+      setRiskStatus("Análise");
+      setRiskStatusDate(new Date().toISOString().split("T")[0]);
+      setRiskOwner("");
+
+    } catch (err) {
+      console.error("Erro ao salvar risco:", err);
+      addNotification("Erro", "Não foi possível salvar o risco.", "error");
+    }
+  };
+
+  const handleEditRisk = (risk: Risco) => {
+    setEditingRiskId(risk.id);
+    setRiskDesc(risk.descricao);
+    setRiskIssue(risk.numIssue || "");
+    setRiskImpact(risk.impacto);
+    setRiskStatus(risk.status);
+    setRiskStatusDate(risk.dataStatus);
+    setRiskOwner(risk.responsavel || "");
+  };
+
+  const handleCancelEditRisk = () => {
+    setEditingRiskId(null);
+    setRiskDesc("");
+    setRiskIssue("");
+    setRiskImpact("Médio");
+    setRiskStatus("Análise");
+    setRiskStatusDate(new Date().toISOString().split("T")[0]);
+    setRiskOwner("");
+  };
+
+  const handleDeleteRisk = async (riskId: string) => {
+    try {
+      await deleteDoc(doc(db, "projetos", selectedProjectId, "riscos", riskId));
+      addNotification("Risco Removido", `O risco foi excluído do projeto.`, "info");
+      if (editingRiskId === riskId) {
+        handleCancelEditRisk();
+      }
+    } catch (err) {
+      console.error("Erro ao apagar risco:", err);
+      addNotification("Erro", "Não foi possível remover o risco.", "error");
+    }
+  };
+
+  const getImpactBadge = (impact: string) => {
+    switch (impact) {
+      case "Baixo":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200/60";
+      case "Médio":
+        return "bg-blue-50 text-blue-700 border-blue-200/60";
+      case "Alto":
+        return "bg-amber-50 text-amber-700 border-amber-200/60";
+      case "Crítico":
+        return "bg-orange-50 text-orange-700 border-orange-200/60";
+      case "Impeditivo":
+        return "bg-rose-50 text-rose-700 border-rose-200/60";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200/60";
+    }
+  };
+
+  const getStatusBadge = (st: string) => {
+    switch (st) {
+      case "Análise":
+        return "bg-slate-100 text-slate-700 border-slate-200";
+      case "Pendente":
+        return "bg-amber-50 text-amber-800 border-amber-200/60";
+      case "Bloqueio":
+        return "bg-red-50 text-red-800 border-red-200/60 font-semibold";
+      case "Mitigado":
+        return "bg-indigo-50 text-indigo-700 border-indigo-200/60";
+      case "Cancelado":
+        return "bg-zinc-100 text-zinc-500 border-zinc-200 line-through";
+      case "Concluído":
+        return "bg-emerald-50 text-emerald-800 border-emerald-200/60 font-semibold";
+      default:
+        return "bg-slate-50 text-slate-600 border-slate-200/60";
     }
   };
 
@@ -779,6 +927,18 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
               >
                 <Bookmark className="w-4 h-4" />
                 Gestão de Marcos (Milestones)
+              </button>
+
+              <button
+                onClick={() => setActiveTab("riscos")}
+                className={`flex-1 py-3.5 px-6 font-display font-semibold text-sm border-b-2 transition-all flex items-center justify-center gap-2 ${
+                  activeTab === "riscos"
+                    ? "border-indigo-600 text-indigo-600 bg-indigo-50/10"
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
+                }`}
+              >
+                <ShieldAlert className="w-4 h-4" />
+                Gestão de Riscos
               </button>
             </div>
 
@@ -1192,6 +1352,231 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
                               >
                                 <Trash className="w-4 h-4" />
                               </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: RISK MANAGEMENT (GESTÃO DE RISCOS) */}
+              {activeTab === "riscos" && (
+                <div className="space-y-6 animate-fade-in font-display">
+                  
+                  {/* Warning / explanation banner */}
+                  <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl flex items-start gap-3">
+                    <ShieldAlert className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm">Gestão de Riscos do Projeto</h4>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                        Controle e monitore os riscos do projeto integrando status, nível de impacto e responsáveis. 
+                        Facilite a tomada de decisões e garanta a segurança operacional de projetos críticos.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Form Create / Edit Risk */}
+                  <form onSubmit={handleSubmitRisk} className="bg-slate-50 p-5 rounded-2xl border border-slate-200/60 space-y-4">
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      {editingRiskId ? "✏️ Editar Risco" : "➕ Registrar Novo Risco"}
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                      {/* Descricao */}
+                      <div className="md:col-span-8">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Descrição do Risco <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={riskDesc}
+                          onChange={(e) => setRiskDesc(e.target.value)}
+                          placeholder="Ex: Demora na homologação do ambiente de produção"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          required
+                        />
+                      </div>
+
+                      {/* Nº Issue */}
+                      <div className="md:col-span-4">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Nº Issue
+                        </label>
+                        <input
+                          type="text"
+                          value={riskIssue}
+                          onChange={(e) => setRiskIssue(e.target.value)}
+                          placeholder="Ex: #405 ou PROJ-12"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      {/* Impacto */}
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Impacto <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={riskImpact}
+                          onChange={(e) => setRiskImpact(e.target.value as any)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium"
+                          required
+                        >
+                          <option value="Baixo">🟢 Baixo</option>
+                          <option value="Médio">🔵 Médio</option>
+                          <option value="Alto">🟡 Alto</option>
+                          <option value="Crítico">🟠 Crítico</option>
+                          <option value="Impeditivo">🔴 Impeditivo</option>
+                        </select>
+                      </div>
+
+                      {/* Status */}
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Status <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={riskStatus}
+                          onChange={(e) => setRiskStatus(e.target.value as any)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium"
+                          required
+                        >
+                          <option value="Análise">⚙️ Análise</option>
+                          <option value="Pendente">⏳ Pendente</option>
+                          <option value="Bloqueio">🔒 Bloqueio</option>
+                          <option value="Mitigado">🛡️ Mitigado</option>
+                          <option value="Cancelado">🚫 Cancelado</option>
+                          <option value="Concluído">✅ Concluído</option>
+                        </select>
+                      </div>
+
+                      {/* Data do Status */}
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Data do Status <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={riskStatusDate}
+                          onChange={(e) => setRiskStatusDate(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          required
+                        />
+                      </div>
+
+                      {/* Responsável */}
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                          Responsável
+                        </label>
+                        <input
+                          type="text"
+                          value={riskOwner}
+                          onChange={(e) => setRiskOwner(e.target.value)}
+                          placeholder="Ex: Mariana Silva"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      {editingRiskId && (
+                        <button
+                          type="button"
+                          onClick={handleCancelEditRisk}
+                          className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-all"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="py-2 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        {editingRiskId ? "Atualizar Risco" : "Registrar Risco"}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Risks List */}
+                  <div className="space-y-3">
+                    <h3 className="font-bold text-slate-900 font-display text-base uppercase tracking-wider">
+                      Riscos Identificados ({projectRisks.length})
+                    </h3>
+
+                    {projectRisks.length === 0 ? (
+                      <div className="border border-dashed border-slate-200 text-center py-12 text-slate-400 rounded-2xl text-xs">
+                        Nenhum risco cadastrado ainda. Use o formulário acima para registrar novos riscos para o projeto.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {projectRisks.map((risk) => {
+                          return (
+                            <div
+                              key={risk.id}
+                              className="p-4 bg-white border border-slate-200 rounded-2xl hover:shadow-xs transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-fade-in"
+                            >
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {/* Impacto Badge */}
+                                  <span className={`text-[10px] uppercase font-bold tracking-tight px-2 py-0.5 border rounded-md ${getImpactBadge(risk.impacto)}`}>
+                                    Impacto: {risk.impacto}
+                                  </span>
+
+                                  {/* Status Badge */}
+                                  <span className={`text-[10px] uppercase font-bold tracking-tight px-2 py-0.5 border rounded-md ${getStatusBadge(risk.status)}`}>
+                                    Status: {risk.status}
+                                  </span>
+
+                                  {/* Data Status */}
+                                  <span className="text-[10px] text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5 flex items-center gap-1 font-semibold">
+                                    <Calendar className="w-3 h-3" /> {risk.dataStatus}
+                                  </span>
+
+                                  {/* Issue Badge */}
+                                  {risk.numIssue && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-indigo-700 font-mono">
+                                      {risk.numIssue}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h4 className="text-sm font-semibold text-slate-900 pr-4">
+                                  {risk.descricao}
+                                </h4>
+
+                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                  <span className="font-semibold text-slate-400 font-display">Responsável:</span>
+                                  <span className="font-semibold text-slate-700 bg-slate-100/80 px-2 py-0.5 rounded text-[10px] font-display">
+                                    {risk.responsavel || "Não atribuído"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Actions CRUD */}
+                              <div className="flex items-center gap-2 self-stretch md:self-auto justify-end md:justify-start border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditRisk(risk)}
+                                  className="p-1 px-2.5 text-xs text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200/55 rounded-lg transition-all flex items-center gap-1 font-semibold cursor-pointer"
+                                  title="Editar Risco"
+                                >
+                                  <Edit className="w-3.5 h-3.5" /> Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRisk(risk.id)}
+                                  className="p-1 px-2.5 text-xs text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/55 rounded-lg transition-all flex items-center gap-1 font-semibold cursor-pointer"
+                                  title="Excluir Risco"
+                                >
+                                  <Trash className="w-3.5 h-3.5" /> Excluir
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
