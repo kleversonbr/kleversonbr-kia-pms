@@ -51,6 +51,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
           list.push({ id: doc.id, ...doc.data() } as Projeto);
         });
         setProjects(list);
+      },
+      (error) => {
+        console.warn("Transient read permission/stale snapshot in dashboard projects:", error);
       }
     );
 
@@ -63,6 +66,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
           list.push({ id: doc.id, ...doc.data() } as Colaborador);
         });
         setCollaborators(list);
+      },
+      (error) => {
+        console.warn("Transient read permission/stale snapshot in dashboard collaborators:", error);
       }
     );
 
@@ -75,6 +81,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
           list.push({ id: doc.id, ...doc.data() } as Alocacao);
         });
         setAllocations(list);
+      },
+      (error) => {
+        console.warn("Transient read permission/stale snapshot in dashboard allocations:", error);
       }
     );
 
@@ -91,24 +100,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = ""
 
     const unsubscribesCycles = projects.map((p) => {
       const q = collection(db, "projetos", p.id, "ciclos");
-      return onSnapshot(q, (snapshot) => {
-        const cycles: CicloInput[] = [];
-        snapshot.forEach((doc) => {
-          cycles.push({ id: doc.id, ...doc.data() } as CicloInput);
-        });
-        setAllCycles((prev) => ({ ...prev, [p.id]: cycles }));
-      });
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const cycles: CicloInput[] = [];
+          snapshot.forEach((doc) => {
+            cycles.push({ id: doc.id, ...doc.data() } as CicloInput);
+          });
+          setAllCycles((prev) => ({ ...prev, [p.id]: cycles }));
+        },
+        (error) => {
+          console.warn(`Transient read permission/stale snapshot in dashboard cycles for ${p.id}:`, error);
+        }
+      );
     });
 
     const unsubscribesMilestones = projects.map((p) => {
       const q = collection(db, "projetos", p.id, "marcos");
-      return onSnapshot(q, (snapshot) => {
-        const milestones: Marco[] = [];
-        snapshot.forEach((doc) => {
-          milestones.push({ id: doc.id, ...doc.data() } as Marco);
-        });
-        setAllMilestones((prev) => ({ ...prev, [p.id]: milestones }));
-      });
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const milestones: Marco[] = [];
+          snapshot.forEach((doc) => {
+            milestones.push({ id: doc.id, ...doc.data() } as Marco);
+          });
+          setAllMilestones((prev) => ({ ...prev, [p.id]: milestones }));
+        },
+        (error) => {
+          console.warn(`Transient read permission/stale snapshot in dashboard milestones for ${p.id}:`, error);
+        }
+      );
     });
 
     return () => {

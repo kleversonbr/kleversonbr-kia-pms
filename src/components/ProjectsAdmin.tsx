@@ -251,24 +251,52 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     if (!window.confirm(`AVISO CRÍTICO!\nExcluir o projeto "${name}" apagará permanentemente todos os seus marcos de entrega, alocações e históricos de ciclos. Deseja prosseguir de qualquer forma?`)) return;
 
     try {
-      const batch = writeBatch(db);
+      // 1. Delete associated child documents gracefully and individually so failure in one subset does not deadlock the main collection delete
 
-      // Delete subcollections cycles
-      const cyclesSnap = await getDocs(collection(db, "projetos", projId, "ciclos"));
-      cyclesSnap.forEach(item => batch.delete(item.ref));
+      // Sub-step A: Delete associated cycles (ciclos)
+      try {
+        const cyclesSnap = await getDocs(collection(db, "projetos", projId, "ciclos"));
+        for (const item of cyclesSnap.docs) {
+          try {
+            await deleteDoc(item.ref);
+          } catch (e) {
+            console.warn(`Falha não obstrutiva ao deletar ciclo ${item.id}:`, e);
+          }
+        }
+      } catch (e) {
+        console.warn("Falha ao listar ciclos para deleção:", e);
+      }
 
-      // Delete subcollections milestones
-      const milestonesSnap = await getDocs(collection(db, "projetos", projId, "marcos"));
-      milestonesSnap.forEach(item => batch.delete(item.ref));
+      // Sub-step B: Delete associated milestones (marcos)
+      try {
+        const milestonesSnap = await getDocs(collection(db, "projetos", projId, "marcos"));
+        for (const item of milestonesSnap.docs) {
+          try {
+            await deleteDoc(item.ref);
+          } catch (e) {
+            console.warn(`Falha não obstrutiva ao deletar marco ${item.id}:`, e);
+          }
+        }
+      } catch (e) {
+        console.warn("Falha ao listar marcos para deleção:", e);
+      }
 
-      // Query alocacoes for this project
-      const allocsSnap = await getDocs(query(collection(db, "alocacoes"), where("projectId", "==", projId)));
-      allocsSnap.forEach(item => batch.delete(item.ref));
+      // Sub-step C: Delete associated allocations (alocacoes)
+      try {
+        const allocsSnap = await getDocs(query(collection(db, "alocacoes"), where("projectId", "==", projId)));
+        for (const item of allocsSnap.docs) {
+          try {
+            await deleteDoc(item.ref);
+          } catch (e) {
+            console.warn(`Falha não obstrutiva ao deletar alocação ${item.id}:`, e);
+          }
+        }
+      } catch (e) {
+        console.warn("Falha ao listar alocações para deleção:", e);
+      }
 
-      // Delete root project
-      batch.delete(doc(db, "projetos", projId));
-
-      await batch.commit();
+      // 2. Delete the root project document itself securely
+      await deleteDoc(doc(db, "projetos", projId));
 
       if (selectedProjectId === projId) {
         setSelectedProjectId("");
@@ -276,7 +304,8 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
 
       addNotification("Projeto Excluído", `O projeto ${name} e todos os dados correlacionados foram permanentemente expurgados.`, "info");
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, "projetos");
+      addNotification("Erro ao Excluir", "Ocorreu um erro ao excluir o projeto. Por favor, verifique suas permissões ou tente novamente.", "error");
+      handleFirestoreError(err, OperationType.DELETE, `projetos/${projId}`);
     }
   };
 
@@ -343,12 +372,56 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     }
   };
 
+  const recalculateProjectProgress = async (projectId: string) => {
+    try {
+      const milestonesSnap = await getDocs(collection(db, "projetos", projectId, "marcos"));
+      const cyclesSnap = await getDocs(collection(db, "projetos", projectId, "ciclos"));
+
+      let percent = 0;
+
+      if (milestonesSnap.size > 0) {
+        // Enforce Milestones Rule: progress = completed / total
+        let completed = 0;
+        milestonesSnap.forEach((item) => {
+          if (item.data() && item.data().concluido === true) {
+            completed++;
+          }
+        });
+        percent = Math.round((completed / milestonesSnap.size) * 100);
+      } else if (cyclesSnap.size > 0) {
+        // Enforce Cycles Rule: progress of the latest cycle (chronologically by dataReferencia)
+        const cycles: any[] = [];
+        cyclesSnap.forEach((item) => {
+          cycles.push({ id: item.id, ...item.data() });
+        });
+        cycles.sort((a, b) => {
+          const dateA = a.dataReferencia || "";
+          const dateB = b.dataReferencia || "";
+          return dateA.localeCompare(dateB);
+        });
+        percent = cycles[cycles.length - 1].progresso || 0;
+      } else {
+        // Rule: no milestones & no cycles = exactly 0%
+        percent = 0;
+      }
+
+      await updateDoc(doc(db, "projetos", projectId), {
+        progressoManual: percent,
+      });
+    } catch (err) {
+      console.error("Erro ao recalcular progresso do projeto:", err);
+    }
+  };
+
   const handleDeleteCycle = async (cycleId: string, cycleName: string) => {
     if (!window.confirm(`Deseja apagar o ciclo consolidado "${cycleName}"?`)) return;
 
     try {
       await deleteDoc(doc(db, "projetos", selectedProjectId, "ciclos", cycleId));
       addNotification("Ciclo Deletado", `Ciclo "${cycleName}" removido do histórico.`, "info");
+      
+      // Recalculate progress after deleting a cycle
+      await recalculateProjectProgress(selectedProjectId);
     } catch (err) {
       console.error("Erro ao deletar ciclo:", err);
     }
@@ -372,6 +445,9 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
 
       setMNome("");
       setMDataLim("");
+
+      // Recalculate progress
+      await recalculateProjectProgress(selectedProjectId);
     } catch (err) {
       console.error("Erro de marcos:", err);
     }
@@ -383,10 +459,13 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         concluido: !currentStatus,
       });
       addNotification(
-        "Marco Atualizado", 
+         "Marco Atualizado", 
         `Marco "${testNome}" marcado como ${!currentStatus ? "CONCLUÍDO" : "EM ABERTO"}.`, 
         !currentStatus ? "success" : "info"
       );
+
+      // Recalculate progress
+      await recalculateProjectProgress(selectedProjectId);
     } catch (err) {
       console.error("Erro ao alternar marco:", err);
     }
@@ -396,6 +475,9 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     try {
       await deleteDoc(doc(db, "projetos", selectedProjectId, "marcos", marcoId));
       addNotification("Marco Removido", `Marco "${testNome}" excluído das metas.`, "info");
+
+      // Recalculate progress
+      await recalculateProjectProgress(selectedProjectId);
     } catch (err) {
       console.error("Erro ao apagar marco:", err);
     }

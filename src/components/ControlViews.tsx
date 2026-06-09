@@ -70,15 +70,21 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
   useEffect(() => {
     if (!userId) return;
     const q = query(collection(db, "projetos"), where("userId", "==", userId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: Projeto[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Projeto);
-      });
-      // Sort in alphabetical order
-      list.sort((a,b) => a.nome.localeCompare(b.nome));
-      setProjects(list);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Projeto[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Projeto);
+        });
+        // Sort in alphabetical order
+        list.sort((a,b) => a.nome.localeCompare(b.nome));
+        setProjects(list);
+      },
+      (error) => {
+        console.warn("Transient snap validation in control-view projects:", error);
+      }
+    );
     return () => unsubscribe();
   }, [userId]);
 
@@ -88,25 +94,72 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
 
     const unsubscribes = projects.map((p) => {
       const q = collection(db, "projetos", p.id, "marcos");
-      return onSnapshot(q, (snapshot) => {
-        const milestonesList: Marco[] = [];
-        snapshot.forEach((doc) => {
-          milestonesList.push({ id: doc.id, ...doc.data() } as Marco);
-        });
-        // Sort chronologically/by limit date
-        milestonesList.sort((a,b) => a.dataLimite.localeCompare(b.dataLimite));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const milestonesList: Marco[] = [];
+          snapshot.forEach((doc) => {
+            milestonesList.push({ id: doc.id, ...doc.data() } as Marco);
+          });
+          // Sort chronologically/by limit date
+          milestonesList.sort((a,b) => a.dataLimite.localeCompare(b.dataLimite));
 
-        setAllMilestones((prev) => ({
-          ...prev,
-          [p.id]: milestonesList,
-        }));
-      });
+          setAllMilestones((prev) => ({
+            ...prev,
+            [p.id]: milestonesList,
+          }));
+        },
+        (error) => {
+          console.warn(`Transient snap validation in control-view marcos for ${p.id}:`, error);
+        }
+      );
     });
 
     return () => {
       unsubscribes.forEach((unsub) => unsub());
     };
   }, [projects]);
+
+  const recalculateProjectProgress = async (projectId: string) => {
+    try {
+      const milestonesSnap = await getDocs(collection(db, "projetos", projectId, "marcos"));
+      const cyclesSnap = await getDocs(collection(db, "projetos", projectId, "ciclos"));
+
+      let percent = 0;
+
+      if (milestonesSnap.size > 0) {
+        // Enforce Milestones Rule: progress = completed / total
+        let completed = 0;
+        milestonesSnap.forEach((item) => {
+          if (item.data() && item.data().concluido === true) {
+            completed++;
+          }
+        });
+        percent = Math.round((completed / milestonesSnap.size) * 100);
+      } else if (cyclesSnap.size > 0) {
+        // Enforce Cycles Rule: progress of the latest cycle (chronologically by dataReferencia)
+        const cycles: any[] = [];
+        cyclesSnap.forEach((item) => {
+          cycles.push({ id: item.id, ...item.data() });
+        });
+        cycles.sort((a, b) => {
+          const dateA = a.dataReferencia || "";
+          const dateB = b.dataReferencia || "";
+          return dateA.localeCompare(dateB);
+        });
+        percent = cycles[cycles.length - 1].progresso || 0;
+      } else {
+        // Rule: no milestones & no cycles = exactly 0%
+        percent = 0;
+      }
+
+      await updateDoc(doc(db, "projetos", projectId), {
+        progressoManual: percent,
+      });
+    } catch (err) {
+      console.error("Erro ao recalcular progresso do projeto:", err);
+    }
+  };
 
   // Toggle milestone checkbox status on Gantt click
   const handleToggleMilestone = async (projectId: string, mId: string, currentStatus: boolean, name: string) => {
@@ -115,6 +168,9 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadI
         concluido: !currentStatus,
       });
       addNotification("Meta Atualizada", `Marco "${name}" agora está ${!currentStatus ? "Concluído" : "Aberto"}.`, "success");
+      
+      // Recalculate progress percentage
+      await recalculateProjectProgress(projectId);
     } catch (e) {
       console.error(e);
     }

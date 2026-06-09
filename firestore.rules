@@ -22,70 +22,67 @@ service cloud.firestore {
 
     // Squads
     match /squads/{squadId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
                     && isValidId(squadId)
                     && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
-                    && request.resource.data.userId == request.auth.uid
-                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+      allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
     }
 
     // 1. Colaboradores
     match /colaboradores/{colaboradorId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
                     && isValidId(colaboradorId)
                     && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
-                    && request.resource.data.userId == request.auth.uid
-                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+      allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
     }
 
     // 2. Projetos
     match /projetos/{projectId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
                     && isValidId(projectId)
                     && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
-                    && request.resource.data.userId == request.auth.uid
-                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+      allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
 
       // Subcollection: Ciclos
       match /ciclos/{cicloId} {
-        allow read: if isSignedIn() && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid;
-        allow create, update: if isSignedIn() 
-                             && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid
+        allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+        allow create: if isSignedIn() 
                              && request.resource.data.userId == request.auth.uid
                              && isValidId(cicloId);
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid;
+        allow update: if isSignedIn() 
+                             && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid)
+                             && request.resource.data.userId == request.auth.uid;
+        allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       }
 
       // Subcollection: Marcos
       match /marcos/{marcoId} {
-        allow read: if isSignedIn() && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid;
-        allow create, update: if isSignedIn() 
-                             && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid
+        allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+        allow create: if isSignedIn() 
                              && request.resource.data.userId == request.auth.uid
                              && isValidId(marcoId);
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/projetos/$(projectId)).data.userId == request.auth.uid;
+        allow update: if isSignedIn() 
+                             && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid)
+                             && request.resource.data.userId == request.auth.uid;
+        allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       }
     }
 
     // 3. Alocacoes
     match /alocacoes/{alocacaoId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
                     && isValidId(alocacaoId)
                     && request.resource.data.colaboradorId is string
                     && request.resource.data.projectId is string;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
-                    && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+      allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
     }
   }
 }

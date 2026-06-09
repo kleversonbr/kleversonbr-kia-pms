@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from "firebase/auth";
 import { auth, googleProvider, db } from "./lib/firebaseInit";
 import { NotificationProvider, useNotifications } from "./components/NotificationToast";
@@ -6,7 +6,7 @@ import { Dashboard } from "./components/Dashboard";
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { ControlViews } from "./components/ControlViews";
 import { ResourceMatrix } from "./components/ResourceMatrix";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import { Projeto, Squad } from "./types";
 import {
   FolderKanban,
@@ -51,14 +51,20 @@ function PPMWorkspaceShell() {
       return;
     }
     const q = query(collection(db, "squads"), where("userId", "==", user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: Squad[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Squad);
-      });
-      list.sort((a,b) => a.nome.localeCompare(b.nome));
-      setSquadsList(list);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Squad[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Squad);
+        });
+        list.sort((a,b) => a.nome.localeCompare(b.nome));
+        setSquadsList(list);
+      },
+      (error) => {
+        console.warn("Transient snap validation in app squads:", error);
+      }
+    );
     return () => unsubscribe();
   }, [user]);
 
@@ -72,6 +78,71 @@ function PPMWorkspaceShell() {
     }
   }, [filterSquadId, filterProjectId, projectsList]);
 
+  const validatedProjectIdsRef = useRef<Set<string>>(new Set());
+
+  // Self-healing: validate & align projects' Progresso Real when the app loads
+  useEffect(() => {
+    if (!user || projectsList.length === 0) return;
+
+    const validateProjectProgress = async (p: Projeto) => {
+      if (validatedProjectIdsRef.current.has(p.id)) return;
+
+      try {
+        // Query subcollection: 'marcos' (milestones)
+        const milestonesSnap = await getDocs(collection(db, "projetos", p.id, "marcos"));
+        const milestones: any[] = [];
+        milestonesSnap.forEach((d) => {
+          milestones.push(d.data());
+        });
+
+        // Query subcollection: 'ciclos' (cycles)
+        const cyclesSnap = await getDocs(collection(db, "projetos", p.id, "ciclos"));
+        const cycles: any[] = [];
+        cyclesSnap.forEach((d) => {
+          cycles.push(d.data());
+        });
+
+        let correctProgress = 0;
+
+        if (milestones.length > 0) {
+          // Rule A: if milestones exist, progress is percent of completed milestones
+          const completed = milestones.filter((m) => m.concluido === true).length;
+          correctProgress = Math.round((completed / milestones.length) * 100);
+        } else if (cycles.length > 0) {
+          // Rule B: if cycles exist, progress is based on the latest cycle (chronologically by dataReferencia)
+          cycles.sort((a, b) => {
+            const dateA = a.dataReferencia || "";
+            const dateB = b.dataReferencia || "";
+            return dateA.localeCompare(dateB);
+          });
+          correctProgress = cycles[cycles.length - 1].progresso || 0;
+        } else {
+          // Rule C: if neither milestones nor cycles exist, progress is strictly 0%
+          correctProgress = 0;
+        }
+
+        const currentProg = p.progressoManual || 0;
+        if (currentProg !== correctProgress) {
+          console.log(
+            `[Self-Healing] Corrigindo progresso do projeto "${p.nome}" (${p.id}): de ${currentProg}% para ${correctProgress}%`
+          );
+          await updateDoc(doc(db, "projetos", p.id), {
+            progressoManual: correctProgress,
+          });
+        }
+        
+        // Add to set only after successful completion so if any read/write fails, it can retry
+        validatedProjectIdsRef.current.add(p.id);
+      } catch (err) {
+        console.error(`Erro ao auto-corrigir progresso do projeto ${p.id}:`, err);
+      }
+    };
+
+    projectsList.forEach((p) => {
+      validateProjectProgress(p);
+    });
+  }, [projectsList, user]);
+
   // Listen to projects list to pipe shared properties to modular views like Resource Matrix
   useEffect(() => {
     if (!user) {
@@ -79,14 +150,20 @@ function PPMWorkspaceShell() {
       return;
     }
     const q = query(collection(db, "projetos"), where("userId", "==", user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: Projeto[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Projeto);
-      });
-      list.sort((a,b) => a.nome.localeCompare(b.nome));
-      setProjectsList(list);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Projeto[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Projeto);
+        });
+        list.sort((a,b) => a.nome.localeCompare(b.nome));
+        setProjectsList(list);
+      },
+      (error) => {
+        console.warn("Transient snap validation in app projects:", error);
+      }
+    );
     return () => unsubscribe();
   }, [user]);
 
