@@ -20,6 +20,18 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // Squads
+    match /squads/{squadId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
+                    && isValidId(squadId)
+                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 200;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     // 1. Colaboradores
     match /colaboradores/{colaboradorId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;

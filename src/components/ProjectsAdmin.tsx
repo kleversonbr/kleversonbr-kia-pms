@@ -1,20 +1,44 @@
 import React, { useState, useEffect } from "react";
-import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus } from "lucide-react";
+import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus, Users, Layers } from "lucide-react";
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebaseInit";
-import { Projeto, CicloInput, Marco } from "../types";
+import { Projeto, CicloInput, Marco, Alocacao, Squad } from "../types";
 import { useNotifications } from "./NotificationToast";
+import { calculateExpectedProgress, getRAGDetails } from "./ControlViews";
+import { getSquadColorClasses } from "../utils/squadColors";
 
 interface ProjectsAdminProps {
   userId: string;
   userEmail: string;
+  filterSquadId?: string;
+  filterProjectId?: string;
 }
 
-export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail }) => {
+export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail, filterSquadId = "", filterProjectId = "" }) => {
   const [projects, setProjects] = useState<Projeto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"cadastros" | "ciclos" | "marcos">("cadastros");
   const { addNotification } = useNotifications();
+
+  // Filtered project list based on selected portfolio filters
+  const filteredProjects = React.useMemo(() => {
+    return projects.filter((p) => {
+      const matchSquad = !filterSquadId || p.squadId === filterSquadId;
+      const matchProject = !filterProjectId || p.id === filterProjectId;
+      return matchSquad && matchProject;
+    });
+  }, [projects, filterSquadId, filterProjectId]);
+
+  // Adjust current selection if it gets filtered out of view
+  useEffect(() => {
+    if (filteredProjects.length > 0) {
+      if (!selectedProjectId || !filteredProjects.some((p) => p.id === selectedProjectId)) {
+        setSelectedProjectId(filteredProjects[0].id);
+      }
+    } else {
+      setSelectedProjectId("");
+    }
+  }, [filteredProjects, selectedProjectId]);
 
   // Project Creation/Edit State
   const [pNome, setPNome] = useState("");
@@ -22,11 +46,16 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
   const [pInicio, setPInicio] = useState("");
   const [pFim, setPFim] = useState("");
   const [pEstagio, setPEstagio] = useState<Projeto["estagio"]>("Ideação");
+  const [pSquadId, setPSquadId] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+
+  // Squads State
+  const [squads, setSquads] = useState<Squad[]>([]);
 
   // Active Project Data
   const [projectCycles, setProjectCycles] = useState<CicloInput[]>([]);
   const [projectMilestones, setProjectMilestones] = useState<Marco[]>([]);
+  const [allocations, setAllocations] = useState<Alocacao[]>([]);
 
   // Cycle Input State
   const [cyNome, setCyNome] = useState("");
@@ -69,6 +98,48 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, "projetos");
+      }
+    );
+    return () => unsubscribe();
+  }, [userId]);
+
+  // Load All Allocations
+  useEffect(() => {
+    if (!userId) return;
+    const q = query(collection(db, "alocacoes"), where("userId", "==", userId));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Alocacao[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Alocacao);
+        });
+        setAllocations(list);
+      },
+      (error) => {
+        console.error("Erro listando alocacoes:", error);
+      }
+    );
+    return () => unsubscribe();
+  }, [userId]);
+
+  // Load Squads Realtime
+  useEffect(() => {
+    if (!userId) return;
+    const q = query(collection(db, "squads"), where("userId", "==", userId));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Squad[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Squad);
+        });
+        // Sort alphabetically
+        list.sort((a, b) => a.nome.localeCompare(b.nome));
+        setSquads(list);
+      },
+      (error) => {
+        console.error("Erro listando squads:", error);
       }
     );
     return () => unsubscribe();
@@ -129,6 +200,9 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
     e.preventDefault();
     if (!pNome.trim() || !pInicio || !pFim) return;
 
+    const selectedSquad = squads.find((s) => s.id === pSquadId);
+    const squadNomeVal = selectedSquad ? selectedSquad.nome : "";
+
     try {
       if (editingProjectId) {
         const ref = doc(db, "projetos", editingProjectId);
@@ -138,6 +212,8 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
           dataInicio: pInicio,
           dataFim: pFim,
           estagio: pEstagio,
+          squadId: pSquadId,
+          squadNome: squadNomeVal,
         });
         addNotification("Projeto Atualizado", `O projeto ${pNome} foi atualizado com sucesso.`, "success");
         setEditingProjectId(null);
@@ -149,6 +225,8 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
           dataFim: pFim,
           estagio: pEstagio,
           progressoManual: 0,
+          squadId: pSquadId,
+          squadNome: squadNomeVal,
           userId,
           gpEmail: userEmail,
           createdAt: new Date().toISOString(),
@@ -163,6 +241,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
       setPInicio("");
       setPFim("");
       setPEstagio("Ideação");
+      setPSquadId("");
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, "projetos");
     }
@@ -207,6 +286,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
     setPInicio(proj.dataInicio);
     setPFim(proj.dataFim);
     setPEstagio(proj.estagio);
+    setPSquadId(proj.squadId || "");
     setEditingProjectId(proj.id);
     setActiveTab("cadastros");
   };
@@ -398,6 +478,22 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
               </select>
             </div>
 
+            <div>
+              <label className="block font-semibold uppercase text-slate-500 mb-1">Squad Relacionada</label>
+              <select
+                value={pSquadId}
+                onChange={(e) => setPSquadId(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+              >
+                <option value="">Nenhuma Squad relacionada</option>
+                {squads.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -414,6 +510,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
                     setPDesc("");
                     setPInicio("");
                     setPFim("");
+                    setPSquadId("");
                   }}
                   className="py-2 px-3 bg-slate-100 hover:bg-slate-250 font-medium rounded-lg"
                 >
@@ -427,61 +524,112 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
         {/* Projects Dashboard list selection selector */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex-1">
           <h3 className="font-bold font-display text-slate-900 mb-3 text-sm uppercase tracking-wide">
-            Seus Projetos Ativos ({projects.length})
+            Seus Projetos Ativos ({filteredProjects.length})
           </h3>
 
-          <div className="space-y-2 overflow-y-auto max-h-[300px] pr-1">
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                onClick={() => setSelectedProjectId(p.id)}
-                className={`p-3 rounded-xl border cursor-pointer text-left transition-all ${
-                  selectedProjectId === p.id
-                    ? "bg-indigo-50/70 border-indigo-200 shadow-sm ring-1 ring-indigo-500/10"
-                    : "bg-slate-50/40 border-slate-100 hover:bg-slate-50"
-                }`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-semibold text-slate-900 text-sm">{p.nome}</h4>
-                    <span className="text-[10px] px-2 py-0.5 mt-1 inline-block bg-slate-200/70 text-slate-600 rounded-md font-medium">
-                      {p.estagio}
+          <div className="space-y-3 overflow-y-auto max-h-[450px] pr-1">
+            {filteredProjects.map((p) => {
+              const actual = p.progressoManual || 0;
+              const pAllocations = allocations.filter((a) => a.projectId === p.id);
+
+              const expected = calculateExpectedProgress(p.dataInicio, p.dataFim);
+              const rag = getRAGDetails(actual, expected, p.dataFim);
+
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => setSelectedProjectId(p.id)}
+                  className={`p-3.5 rounded-xl border cursor-pointer text-left transition-all ${
+                    selectedProjectId === p.id
+                      ? "bg-indigo-50/70 border-indigo-200 shadow-sm ring-1 ring-indigo-500/10"
+                      : "bg-slate-50/40 border-slate-100 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-semibold text-slate-900 text-sm leading-tight">{p.nome}</h4>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[10px] px-2 py-0.5 inline-block bg-slate-200/70 text-slate-600 rounded-md font-medium">
+                          {p.estagio}
+                        </span>
+                        {p.squadNome && (
+                          <span className={`text-[10px] px-2 py-0.5 inline-flex items-center gap-1 border rounded-md font-bold ${getSquadColorClasses(p.squadNome)}`}>
+                            <Layers className="w-2.5 h-2.5" />
+                            {p.squadNome}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleEditProject(p)}
+                        className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded transition-colors"
+                        title="Editar"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProject(p.id, p.nome)}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded transition-colors"
+                        title="Excluir"
+                      >
+                        <Trash className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>Progresso Real:</span>
+                    </div>
+                    <span className="font-bold text-slate-700">{actual}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1 mt-1 overflow-hidden">
+                    <div
+                      className="bg-indigo-600 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${actual}%` }}
+                    />
+                  </div>
+
+                  {/* Delivery Date & Status Indicators */}
+                  <div className="mt-3 flex flex-wrap items-center justify-between text-[11px] gap-2 border-t border-slate-100/80 pt-2.5">
+                    <div className="flex items-center gap-1 text-slate-500">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Entrega: <strong className="text-slate-700">{p.dataFim ? p.dataFim.split("-").reverse().join("/") : "Não def."}</strong></span>
+                    </div>
+
+                    <span className={`px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase tracking-wider border flex items-center gap-0.5 ${rag.textClass}`}>
+                      {rag.emoji} {rag.label.split(" - ")[1] || rag.label}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => handleEditProject(p)}
-                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded transition-colors"
-                      title="Editar"
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteProject(p.id, p.nome)}
-                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-white rounded transition-colors"
-                      title="Excluir"
-                    >
-                      <Trash className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Allocated Collaborators */}
+                  <div className="mt-2.5 space-y-1">
+                    <div className="flex items-center gap-1 text-[9px] text-slate-400 uppercase font-semibold tracking-wider">
+                      <Users className="w-3 h-3 text-slate-400" />
+                      <span>Colaboradores ({pAllocations.length})</span>
+                    </div>
+                    {pAllocations.length === 0 ? (
+                      <p className="text-[10px] text-slate-400 italic">Nenhum colaborador alocado</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {pAllocations.map((alloc) => (
+                          <span
+                            key={alloc.id}
+                            className="px-1.5 py-0.5 bg-slate-100 border border-slate-200/60 rounded-md text-[9px] text-slate-600 font-medium"
+                            title={`${alloc.colaboradorNome} - ${alloc.colaboradorPapel} (${alloc.percentualDedication}%)`}
+                          >
+                            {alloc.colaboradorNome} <span className="text-slate-400 text-[8px]">({alloc.colaboradorPapel})</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
-                  <div className="flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-slate-400" />
-                    <span>Progresso:</span>
-                  </div>
-                  <span className="font-bold text-slate-700">{p.progressoManual}%</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-1 mt-1 overflow-hidden">
-                  <div
-                    className="bg-indigo-600 h-full rounded-full transition-all duration-300"
-                    style={{ width: `${p.progressoManual}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -505,7 +653,15 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
             <div className="p-6 bg-slate-50 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
                 <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Trabalhando no Projeto</span>
-                <h1 className="text-2xl font-bold font-display text-slate-900 tracking-tight">{activeProject.nome}</h1>
+                <div className="flex flex-wrap items-center gap-3 mt-1">
+                  <h1 className="text-2xl font-bold font-display text-slate-900 tracking-tight">{activeProject.nome}</h1>
+                  {activeProject.squadNome && (
+                    <span className={`text-xs px-2.5 py-1 inline-flex items-center gap-1.5 border rounded-md font-bold shadow-sm ${getSquadColorClasses(activeProject.squadNome)}`}>
+                      <Layers className="w-3.5 h-3.5" />
+                      Squad: {activeProject.squadNome}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-slate-500 mt-1 max-w-xl">{activeProject.descricao || "Sem escopo detalhado registrado."}</p>
               </div>
 
@@ -840,10 +996,10 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
                 <div className="space-y-6 animate-fade-in">
                   
                   {/* Create Milestone form */}
-                  <form onSubmit={handleSubmitMilestone} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end bg-slate-50 p-4 rounded-xl border border-slate-150">
-                    <div className="md:col-span-2">
+                  <form onSubmit={handleSubmitMilestone} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-slate-50 p-4 rounded-xl border border-slate-150">
+                    <div className="md:col-span-6">
                       <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                        Nome do Marco de Entrega Critíca
+                        Nome do Marco de Entrega Crítica
                       </label>
                       <input
                         type="text"
@@ -855,23 +1011,23 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail 
                       />
                     </div>
 
-                    <div className="flex gap-2">
-                      <div className="flex-1">
-                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                          Data Limite
-                        </label>
-                        <input
-                          type="date"
-                          value={mDataLim}
-                          onChange={(e) => setMDataLim(e.target.value)}
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none"
-                          required
-                        />
-                      </div>
+                    <div className="md:col-span-4">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Data Limite
+                      </label>
+                      <input
+                        type="date"
+                        value={mDataLim}
+                        onChange={(e) => setMDataLim(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none"
+                        required
+                      />
+                    </div>
 
+                    <div className="md:col-span-2">
                       <button
                         type="submit"
-                        className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1 flex-shrink-0"
+                        className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" /> Adicionar
                       </button>

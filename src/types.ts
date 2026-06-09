@@ -7,6 +7,20 @@ export interface Colaborador {
   nome: string;
   papel: string; // ex: Dev, SM, PO, Designer, QA, etc.
   custoHora?: number;
+  squadId?: string;
+  squadNome?: string;
+  userId: string;
+  createdAt: string;
+}
+
+export interface Squad {
+  id: string;
+  nome: string;
+  tamanho: number;
+  metaBugs: number;
+  metaEficiencia: number;
+  metaAtrasos: number;
+  metaSla: number;
   userId: string;
   createdAt: string;
 }
@@ -18,6 +32,9 @@ export interface Projeto {
   dataInicio: string; // YYYY-MM-DD
   dataFim: string; // YYYY-MM-DD
   estagio: "Ideação" | "Viabilidade" | "Em Execução" | "Validação/Homologação" | "Concluído";
+  progressoManual?: number; // Optional manual progress percentage
+  squadId?: string; // Linked Squad ID
+  squadNome?: string; // Linked Squad Name
   userId: string;
   gpEmail: string;
   createdAt: string;

@@ -46,34 +46,102 @@ app.post("/api/gemini/analyze", async (req, res) => {
       return;
     }
 
+    // LGPD Compliance: Anonymize collaborator names, emails, and sensitive identifiers
+    const colabNameMap: { [id: string]: string } = {};
+    let colabCounter = 1;
+
+    const anonymizedCollaborators = (collaborators || []).map((c: any) => {
+      if (!c) return c;
+      if (!colabNameMap[c.id]) {
+        colabNameMap[c.id] = `Colaborador ${colabCounter++} (${c.papel || "Sem Função"})`;
+      }
+      return {
+        id: c.id,
+        papel: c.papel,
+        custoHora: c.custoHora,
+        nomeAnonimizado: colabNameMap[c.id]
+      };
+    });
+
+    const anonymizedAllocations = (allocations || []).map((a: any) => {
+      if (!a) return a;
+      const anonName = colabNameMap[a.colaboradorId] || `Colaborador Anonimizado (${a.colaboradorPapel || "Sem Função"})`;
+      return {
+        id: a.id,
+        colaboradorId: a.colaboradorId,
+        colaboradorPapel: a.colaboradorPapel,
+        projectId: a.projectId,
+        projectNome: a.projectNome,
+        percentualDedication: a.percentualDedication,
+        colaboradorNomeAnonimizado: anonName
+      };
+    });
+
+    // Anonymize project manager emails and other personal references
+    const anonymizedProjects = (projects || []).map((p: any) => {
+      if (!p) return p;
+      return {
+        id: p.id,
+        nome: p.nome,
+        dataInicio: p.dataInicio,
+        dataFim: p.dataFim,
+        estagio: p.estagio,
+        progressoManualPercentage: p.progressoManualPercentage,
+        progressoEsperadoPercentage: p.progressoEsperadoPercentage,
+        ciclosFinancesAgile: p.ciclosFinancesAgile,
+        marcosMilestones: p.marcosMilestones,
+        squadId: p.squadId,
+        squadNome: p.squadNome,
+        gpEmail: "gp@empresa.com.br" // Anonymized/generic email
+      };
+    });
+
     const ai = getGemini();
 
     const prompt = `
-Você é um Engenheiro de Software Full Stack Sênior, Gerente de Projetos Certificado (PMP) e Arquiteto de Soluções atuando como Auditor Executivo.
-Por favor, faça uma análise crítica e inteligente do seguinte portfólio de projetos para a diretoria. 
-O seu relatório deve ser profissional, direto ao ponto, em português brasileiro (PT-BR), focado na saúde financeira, prazos (faróis de alerta RAG), alocação de recursos (over-allocation) e qualidade técnica.
+Você é um Engenheiro de Software Full Stack Sênior, Gerente de Projetos Certificado (PMP) e Arquiteto de Soluções atuando como Auditor Executivo de Projetos.
+Por favor, faça uma análise crítica detalhada e completa da gestão geral dos projetos para auxiliar o gestor do portfólio.
+Sua análise deve trazer insights estratégicos valiosos, diagnósticos de anomalias/gargalos e sugestões de mitigação práticas de gestão de projetos.
 
-DADOS DE ENTRADA:
-- Projetos cadastrados: ${JSON.stringify(projects, null, 2)}
-- Banco de Talentos (Recursos): ${JSON.stringify(collaborators || [], null, 2)}
-- Matriz de Alocação de Recursos: ${JSON.stringify(allocations || [], null, 2)}
+DADOS DE PORTFÓLIO ANONIMIZADOS (CONFORME LGPD):
+- Projetos ativos: ${JSON.stringify(anonymizedProjects, null, 2)}
+- Banco de Talentos (Funções/Custos): ${JSON.stringify(anonymizedCollaborators, null, 2)}
+- Matriz de Alocação (Dedicação): ${JSON.stringify(anonymizedAllocations, null, 2)}
 
-DIRETRIZES DE RETORNO (Responda em formato Markdown estruturado):
-1. **Sumário Executivo (Executive Overview):** Um resumo de alto impacto sobre a saúde geral do portfólio. Avalie o CPI global e diga se estamos estourando o orçamento geral ou entregando com lucro.
-2. **Prazos e Alertas (RAG Analysis):** Diagnóstico rápido dos projetos em Vermelho (🔴) ou Amarelo (🟡), explicando os possíveis motivos com base nos dados fornecidos e estimando o desvio em relação ao tempo teoricamente decorrido.
-3. **Eficiência e Alocação:** Comente sobre a alocação do time (se há sobrecarga com colaboradores acima de 100% de dedicação). Cite nomes.
-4. **Métricas Ágeis & Qualidade:** Avalie tendências de bugs, se a previsibilidade das sprints está boa (entregues/planejados) e se a densidade de defeitos está aceitável.
-5. **Recomendações Práticas (Plano de Ação):** 3 ou 4 ações imediatas e práticas de mitigação de riscos que o gerente de projetos deve tomar para reverter desvios de custo ou cronograma.
+ATENÇÃO CRÍTICA (NÃO ADICIONE CABEÇALHOS REDUNDANTES):
+Não inclua nenhum cabeçalho formal, tais como:
+- "# Relatório de Auditoria Executiva de Portfólio"
+- "**Destinatário:** Diretoria Executiva"
+- "**Emitido por:** Engenheiro de Software Principal, Arquiteto de Soluções & Diretor de Projetos (PMP)"
+- "**Data de Referência:** Maio de 2026"
+Inicie o seu relatório DIRETAMENTE com o primeiro tópico útil de análise (por exemplo, "Análise do Portfólio de Projetos" ou "Sumário de Gestão").
 
-Escreva o relatório em linguagem corporativa elegante, sóbria e pragmática, sem enfeites desnecessários.
-    `;
+DIRETRIZES DO RELATÓRIO (Responda em formato Markdown bem estruturado, focado em insights e sugestões):
+1. **Análise de Progresso e Saúde (RAG):** Diagnóstico da evolução física dos projetos. Avalie as disparidades de progresso esperado vs realizável. Indique gargalos de cronograma gerais sem comprometer identidades.
+2. **Saúde Financeira e Orçamento:** Avalie o CPI global e de cada iniciativa aplicável, fornecendo insights sobre custos previstos versus custos consumidos.
+3. **Logística e Capacidade do Squad:** Análise se há gargalos operacionais ou sobrecarga de alocação de squads (colaboradores acumulando mais de 100% de dedicação). Refira-se a eles usando suas representações anônimas (ex: "Colaborador 1 (Dev React)").
+4. **Métricas de Qualidade de Engenharia:** Avalie as taxas de bugs por ciclo, indicadores de previsibilidade ágil e as melhores práticas que precisam ser reforçadas.
+5. **Insights e Sugestões Práticas de Mitigação:** Sugira táticas concretas baseadas nas melhores práticas de gerenciamento de portfólios (renegociação de prazo, buffer de contingência, redistribuição de alocações, etc.) para reverter atrasos e riscos detectados.
+
+Escreva o relatório em linguagem corporativa fluida, rica em insights estratégicos e altamente prática para tomada de decisões.
+`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
       contents: prompt,
     });
 
-    res.json({ analysis: response.text });
+    let cleanedText = response.text || "";
+
+    // Regular Expression sanitization fallback to remove any formal headers if the model accidentally produces them
+    cleanedText = cleanedText
+      .replace(/#\s*Relatório de Auditoria Executiva de Portfólio\s*/gi, "")
+      .replace(/\*\*Destinatário:\*\*\s*[^\n]*\n?/gi, "")
+      .replace(/\*\*Emitido por:\*\*\s*[^\n]*\n?/gi, "")
+      .replace(/\*\*Data de Referência:\*\*\s*[^\n]*\n?/gi, "")
+      .trim();
+
+    res.json({ analysis: cleanedText });
   } catch (error: any) {
     console.error("Erro na análise do Gemini:", error);
     res.status(500).json({ 

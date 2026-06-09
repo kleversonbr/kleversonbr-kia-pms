@@ -4,9 +4,12 @@ import { collection, onSnapshot, query, where, doc, updateDoc, writeBatch, getDo
 import { db } from "../lib/firebaseInit";
 import { Projeto, Marco } from "../types";
 import { useNotifications } from "./NotificationToast";
+import { getSquadColorClasses } from "../utils/squadColors";
 
 interface ControlViewsProps {
   userId: string;
+  filterSquadId?: string;
+  filterProjectId?: string;
 }
 
 // Utility: Calculate expected progress % based on timeline
@@ -27,22 +30,41 @@ export function calculateExpectedProgress(startStr: string, endStr: string): num
 }
 
 // Utility: Calculate RAG Alert Farol
-export function getRAGDetails(actual: number, expected: number) {
-  const diff = expected - actual;
-  if (diff <= 0) {
-    return { code: "green", label: "Verde - No Prazo", emoji: "🟢", colorClass: "bg-emerald-500", textClass: "text-emerald-600 border-emerald-200 bg-emerald-50" };
-  } else if (diff <= 10) {
-    return { code: "yellow", label: "Amarelo - Atenção", emoji: "🟡", colorClass: "bg-amber-500", textClass: "text-amber-600 border-amber-200 bg-amber-50" };
-  } else {
-    return { code: "red", label: "Vermelho - Atraso Crítico", emoji: "🔴", colorClass: "bg-rose-500", textClass: "text-rose-600 border-rose-200 bg-rose-50" };
+export function getRAGDetails(actual: number, expected: number, dataFim?: string) {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  const todayStr = `${year}-${month}-${day}`;
+
+  const isOverdue = dataFim ? (todayStr > dataFim && actual < 100) : false;
+
+  if (isOverdue) {
+    return { code: "red", label: "Vermelho - Atraso", emoji: "🔴", colorClass: "bg-rose-500", textClass: "text-rose-600 border-rose-200 bg-rose-50" };
   }
+
+  const diff = expected - actual;
+  if (diff > 0 && actual < 100) {
+    return { code: "yellow", label: "Amarelo - Atenção", emoji: "🟡", colorClass: "bg-amber-500", textClass: "text-amber-600 border-amber-200 bg-amber-50" };
+  }
+
+  return { code: "green", label: "Verde - No Prazo", emoji: "🟢", colorClass: "bg-emerald-500", textClass: "text-emerald-600 border-emerald-200 bg-emerald-50" };
 }
 
-export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
+export const ControlViews: React.FC<ControlViewsProps> = ({ userId, filterSquadId = "", filterProjectId = "" }) => {
   const [projects, setProjects] = useState<Projeto[]>([]);
   const [activeLayout, setActiveLayout] = useState<"gantt" | "kanban">("gantt");
   const [allMilestones, setAllMilestones] = useState<{ [projectId: string]: Marco[] }>({});
   const { addNotification } = useNotifications();
+
+  // Filtered project list based on selected portfolio context
+  const filteredProjects = React.useMemo(() => {
+    return projects.filter((p) => {
+      const matchSquad = !filterSquadId || p.squadId === filterSquadId;
+      const matchProject = !filterProjectId || p.id === filterProjectId;
+      return matchSquad && matchProject;
+    });
+  }, [projects, filterSquadId, filterProjectId]);
 
   // Load Projects Realtime
   useEffect(() => {
@@ -155,7 +177,7 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
         </div>
       </div>
 
-      {projects.length === 0 ? (
+      {filteredProjects.length === 0 ? (
         <div className="bg-white rounded-3xl p-16 text-center border border-slate-100 shadow-sm flex flex-col items-center justify-center gap-3">
           <div className="p-4 bg-amber-50 text-amber-500 rounded-full animate-pulse">
             <Milestone className="w-8 h-8" />
@@ -180,9 +202,9 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
           </div>
 
           <div className="space-y-8 pt-4">
-            {projects.map((p) => {
+            {filteredProjects.map((p) => {
               const expectedProg = calculateExpectedProgress(p.dataInicio, p.dataFim);
-              const ragDetails = getRAGDetails(p.progressoManual, expectedProg);
+              const ragDetails = getRAGDetails(p.progressoManual || 0, expectedProg, p.dataFim);
               const milestones = allMilestones[p.id] || [];
 
               // Calculate current timeline elapsed percent for "Today Indicator" positioning
@@ -204,10 +226,15 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
                     <p className="text-[10px] text-slate-400 font-mono mt-1">
                       GP: {p.gpEmail.split("@")[0]} | {p.dataInicio} ~ {p.dataFim}
                     </p>
-                    <div className="flex gap-2 items-center mt-2">
+                    <div className="flex flex-wrap gap-2 items-center mt-2">
                       <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-medium text-slate-600 border border-slate-200">
                         {p.estagio}
                       </span>
+                      {p.squadNome && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${getSquadColorClasses(p.squadNome)}`}>
+                          {p.squadNome}
+                        </span>
+                      )}
                       <span className="text-[10px] text-indigo-600 font-bold font-mono">
                         Real: {p.progressoManual}%
                       </span>
@@ -331,7 +358,7 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 overflow-x-auto pb-4">
           
           {(["Ideação", "Viabilidade", "Em Execução", "Validação/Homologação", "Concluído"] as Projeto["estagio"][]).map((stage, sIdx) => {
-            const listDocs = projects.filter((p) => p.estagio === stage);
+            const listDocs = filteredProjects.filter((p) => p.estagio === stage);
 
             return (
               <div key={stage} className="glass border border-slate-200/60 p-4 rounded-2xl flex flex-col gap-3 min-w-[220px] max-h-[500px]">
@@ -348,7 +375,7 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
                 <div className="space-y-3 flex-1 overflow-y-auto pr-1">
                   {listDocs.map((p) => {
                     const expected = calculateExpectedProgress(p.dataInicio, p.dataFim);
-                    const rag = getRAGDetails(p.progressoManual, expected);
+                    const rag = getRAGDetails(p.progressoManual || 0, expected, p.dataFim);
                     
                     // Find next milestone close to current time 
                     const mList = allMilestones[p.id] || [];
@@ -361,7 +388,14 @@ export const ControlViews: React.FC<ControlViewsProps> = ({ userId }) => {
                       >
                         {/* Upper row */}
                         <div className="flex justify-between items-start">
-                          <h4 className="font-bold text-slate-900 text-xs tracking-tight line-clamp-1">{p.nome}</h4>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-xs tracking-tight line-clamp-1">{p.nome}</h4>
+                            {p.squadNome && (
+                              <span className={`text-[9px] px-1.5 py-0.5 mt-0.5 inline-block border rounded font-bold ${getSquadColorClasses(p.squadNome)}`}>
+                                {p.squadNome}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Middle meta gp */}

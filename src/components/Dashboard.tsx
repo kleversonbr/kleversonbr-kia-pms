@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import { DollarSign, ShieldAlert, TrendingDown, Users, Flame, Milestone, Sparkles, Printer, RefreshCw, AlertCircle, HelpCircle } from "lucide-react";
 import { collection, onSnapshot, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebaseInit";
@@ -22,9 +23,11 @@ import {
 
 interface DashboardProps {
   userId: string;
+  filterSquadId?: string;
+  filterProjectId?: string;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ userId, filterSquadId = "", filterProjectId = "" }) => {
   const [projects, setProjects] = useState<Projeto[]>([]);
   const [collaborators, setCollaborators] = useState<Colaborador[]>([]);
   const [allocations, setAllocations] = useState<Alocacao[]>([]);
@@ -115,15 +118,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
   }, [projects]);
 
   // ----------------------------------------------------
-  // CALCULATIONS / DERIVED SUMMARY STATE FOR EXECUTIVE DASHBOARD
+  // FILTERED VIEW CALCULATIONS / INTEGRATED PORTFOLIO FILTERS
   // ----------------------------------------------------
+  const filteredProjects = React.useMemo(() => {
+    return projects.filter((p) => {
+      const matchSquad = !filterSquadId || p.squadId === filterSquadId;
+      const matchProject = !filterProjectId || p.id === filterProjectId;
+      return matchSquad && matchProject;
+    });
+  }, [projects, filterSquadId, filterProjectId]);
+
+  const filteredCollaborators = React.useMemo(() => {
+    return collaborators.filter((c) => {
+      return !filterSquadId || c.squadId === filterSquadId;
+    });
+  }, [collaborators, filterSquadId]);
+
+  const filteredAllocations = React.useMemo(() => {
+    return allocations.filter((a) => {
+      const colMatches = !filterSquadId || collaborators.some(c => c.id === a.colaboradorId && c.squadId === filterSquadId);
+      const projMatches = filteredProjects.some(p => p.id === a.projectId);
+      return colMatches && projMatches;
+    });
+  }, [allocations, filterSquadId, collaborators, filteredProjects]);
 
   // 1. CPI Global (Pilar 5.1)
   const financialSummary = React.useMemo(() => {
     let globalPV = 0; // Planned Value
     let globalAC = 0; // Actual Cost
 
-    (Object.values(allCycles) as CicloInput[][]).forEach((cyclesList) => {
+    filteredProjects.forEach((p) => {
+      const cyclesList = allCycles[p.id] || [];
       cyclesList.forEach((cy) => {
         const pv = (cy.financeiro?.pessoasPlanejado || 0) + (cy.financeiro?.infraPlanejado || 0) + (cy.financeiro?.fornecedoresPlanejado || 0);
         const ac = (cy.financeiro?.pessoasReal || 0) + (cy.financeiro?.infraReal || 0) + (cy.financeiro?.fornecedoresReal || 0);
@@ -134,11 +159,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
 
     const cpi = globalAC > 0 ? parseFloat((globalPV / globalAC).toFixed(2)) : 0;
     return { globalPV, globalAC, cpi };
-  }, [allCycles]);
+  }, [allCycles, filteredProjects]);
 
   // 2. Timeline comparison progress vs esperados (Pilar 5.2)
   const projectsProgressData = React.useMemo(() => {
-    return projects.map((p) => {
+    return filteredProjects.map((p) => {
       const expected = calculateExpectedProgress(p.dataInicio, p.dataFim);
       return {
         name: p.nome,
@@ -146,7 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
         "Esperado (%)": expected,
       };
     });
-  }, [projects]);
+  }, [filteredProjects]);
 
   // 3. Planned Hours vs Gastas & Predictability Index (Pilar 5.3)
   const hoursAndPredictability = React.useMemo(() => {
@@ -154,7 +179,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
     let totalDeliveredPoints = 0;
     const hoursData: { name: string; "Horas Previstas": number; "Horas Gastas": number }[] = [];
 
-    projects.forEach((p) => {
+    filteredProjects.forEach((p) => {
       let projPlannedHours = 0;
       let projActualHours = 0;
       const cycles = allCycles[p.id] || [];
@@ -173,17 +198,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
       });
     });
 
-    const predictability = totalPlannedPoints > 0 ? Math.round((totalDeliveredPoints / totalPlannedPoints) * 100) : 0;
+    const predictability = totalPlannedPoints > 0 ? Math.round((totalDeliveredPoints / totalPlannedPoints) * 105) : 0; // Maintain target logic adjusted to cap or standard %
 
-    return { hoursData, predictability };
-  }, [projects, allCycles]);
+    return { hoursData, predictability: Math.min(predictability, 100) };
+  }, [filteredProjects, allCycles]);
 
   // 4. Team Resource Allocation (Pilar 5.4)
   const resourceAllocationChart = React.useMemo(() => {
     let totalAllocedPct = 0;
-    const maxCapacity = (collaborators.length || 0) * 100;
+    const maxCapacity = (filteredCollaborators.length || 0) * 100;
 
-    allocations.forEach((a) => {
+    filteredAllocations.forEach((a) => {
       totalAllocedPct += a.percentualDedication || 0;
     });
 
@@ -194,12 +219,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
       { name: "Alocado", value: activePct, color: "#4f46e5" },   // indigo
       { name: "Disponível", value: availablePct, color: "#e2e8f0" } // slate-200
     ];
-  }, [collaborators, allocations]);
+  }, [filteredCollaborators, filteredAllocations]);
 
   // 5. Defect Density per module / project (Pilar 5.5)
-  // Let's compute defect counts per project
   const defectsDensityData = React.useMemo(() => {
-    return projects.map((p) => {
+    return filteredProjects.map((p) => {
       let totalBugs = 0;
       let totalDeliveries = 0;
       const cycles = allCycles[p.id] || [];
@@ -209,28 +233,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
         totalDeliveries += cy.entregasCount || 0;
       });
 
-      // Density is bugs per delivery milestone (or simple bug representations)
       return {
         name: p.nome,
         "Bugs Registrados": totalBugs,
         "Quantidade Entregas": totalDeliveries,
       };
     });
-  }, [projects, allCycles]);
+  }, [filteredProjects, allCycles]);
 
   // 6. Bug Trend over time (Pilar 5.3 line chart)
   const bugTrendData = React.useMemo(() => {
     const rawMap: { [dateStr: string]: number } = {};
 
-    (Object.values(allCycles) as CicloInput[][]).forEach((cyclesList) => {
-      cyclesList.forEach((cy) => {
+    filteredProjects.forEach((p) => {
+      const cycles = allCycles[p.id] || [];
+      cycles.forEach((cy) => {
         rawMap[cy.dataReferencia] = (rawMap[cy.dataReferencia] || 0) + (cy.bugs || 0);
       });
     });
 
     const sortedDates = Object.keys(rawMap).sort();
     return sortedDates.map((dateStr) => {
-      // Human-friendly abbreviation like "27/Mai"
       const parts = dateStr.split("-");
       const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
 
@@ -239,7 +262,82 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
         "Total de Bugs": rawMap[dateStr],
       };
     });
-  }, [allCycles]);
+  }, [allCycles, filteredProjects]);
+
+  // Helpers for monthly collaborator allocation calculations
+  const getYearMonth = (dateStr: string) => {
+    if (!dateStr || dateStr.length < 7) return "";
+    return dateStr.substring(0, 7); // "YYYY-MM"
+  };
+
+  const getRollingMonths = () => {
+    const result: { id: string; label: string }[] = [];
+    const today = new Date();
+    
+    // 2 months in the past, current month, and 3 months ahead
+    for (let i = -2; i <= 3; i++) {
+      const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
+      const monthStr = String(d.getMonth() + 1).padStart(2, "0");
+      const yearStr = String(d.getFullYear());
+      const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+      result.push({
+        id: `${yearStr}-${monthStr}`,
+        label: `${monthNames[d.getMonth()]}/${yearStr.slice(-2)}`
+      });
+    }
+    return result;
+  };
+
+  // 8. Summary of RAG status for all projects
+  const ragSummaryData = React.useMemo(() => {
+    let green = 0;
+    let yellow = 0;
+    let red = 0;
+
+    filteredProjects.forEach((p) => {
+      const expected = calculateExpectedProgress(p.dataInicio, p.dataFim);
+      const actual = p.progressoManual || 0;
+      const rag = getRAGDetails(actual, expected, p.dataFim);
+      if (rag.code === "green") green++;
+      else if (rag.code === "yellow") yellow++;
+      else if (rag.code === "red") red++;
+    });
+
+    return [
+      { name: "Verde - No Prazo", value: green, color: "#10b981", emoji: "🟢" },
+      { name: "Amarelo - Atenção", value: yellow, color: "#f59e0b", emoji: "🟡" },
+      { name: "Vermelho - Atraso", value: red, color: "#ef4444", emoji: "🔴" }
+    ];
+  }, [filteredProjects]);
+
+  // 9. Monthly Collaborators' Allocation Percentages
+  const collaboratorsMonthlyAllocations = React.useMemo(() => {
+    const months = getRollingMonths();
+    return months.map((m) => {
+      const row: { [key: string]: any } = { month: m.label };
+      
+      filteredCollaborators.forEach((colab) => {
+        let totalPct = 0;
+        const colabAllocs = filteredAllocations.filter((a) => a.colaboradorId === colab.id);
+        
+        colabAllocs.forEach((alloc) => {
+          const proj = filteredProjects.find((p) => p.id === alloc.projectId);
+          if (proj) {
+            const startYM = getYearMonth(proj.dataInicio);
+            const endYM = getYearMonth(proj.dataFim);
+            
+            if (startYM && endYM && startYM <= m.id && endYM >= m.id) {
+              totalPct += alloc.percentualDedication || 0;
+            }
+          }
+        });
+        
+        row[colab.nome] = totalPct;
+      });
+      
+      return row;
+    });
+  }, [filteredProjects, filteredCollaborators, filteredAllocations]);
 
   // 7. Overdue active Critical milestones list tracker
   const criticalMilestones = React.useMemo(() => {
@@ -247,16 +345,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
     const today = new Date();
     today.setHours(0,0,0,0);
 
-    (Object.entries(allMilestones) as [string, Marco[]][]).forEach(([projId, milestones]) => {
-      const proj = projects.find((p) => p.id === projId);
-      const projName = proj ? proj.nome : "Ativo";
-
+    filteredProjects.forEach((p) => {
+      const milestones = allMilestones[p.id] || [];
       milestones.forEach((m) => {
         const mDate = new Date(m.dataLimite);
         const overdue = mDate < today && !m.concluido;
         if (!m.concluido) {
           list.push({
-            project: projName,
+            project: p.nome,
             name: m.nome,
             date: m.dataLimite,
             delay: overdue,
@@ -268,7 +364,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
     // Sort by limit date close to current
     list.sort((a,b) => a.date.localeCompare(b.date));
     return list.slice(0, 5);
-  }, [allMilestones, projects]);
+  }, [allMilestones, filteredProjects]);
 
   // Request portfolio strategic analysis with Gemini AI
   const handleTriggerGeminiAnalysis = async () => {
@@ -276,7 +372,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
     setAiAnalysis("");
     try {
       // Package payload to send to Gemini API
-      const pPayload = projects.map(p => {
+      const pPayload = filteredProjects.map(p => {
         const expected = calculateExpectedProgress(p.dataInicio, p.dataFim);
         const cyList = allCycles[p.id] || [];
         const mList = allMilestones[p.id] || [];
@@ -291,6 +387,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
           progressoEsperadoPercentage: expected,
           ciclosFinancesAgile: cyList,
           marcosMilestones: mList,
+          squadId: p.squadId,
+          squadNome: p.squadNome,
         };
       });
 
@@ -299,8 +397,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projects: pPayload,
-          collaborators,
-          allocations,
+          collaborators: filteredCollaborators,
+          allocations: filteredAllocations,
         }),
       });
 
@@ -457,8 +555,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
                   <div className="h-3 bg-indigo-800/60 rounded animate-pulse w-2/3"></div>
                 </div>
               ) : (
-                <div className="text-indigo-100 text-sm leading-relaxed whitespace-pre-wrap font-sans space-y-2 prose prose-invert overflow-y-auto max-h-[350px]">
-                  {aiAnalysis}
+                <div className="text-indigo-100 text-sm leading-relaxed font-sans overflow-y-auto max-h-[450px] pr-1">
+                  <ReactMarkdown
+                    components={{
+                      h1: ({node, ...props}) => <h1 className="text-xl font-bold font-display text-white mt-4 mb-2 border-b border-indigo-800 pb-1" {...props} />,
+                      h2: ({node, ...props}) => <h2 className="text-lg font-bold font-display text-indigo-200 mt-4 mb-1.5" {...props} />,
+                      h3: ({node, ...props}) => <h3 className="text-base font-bold font-display text-indigo-300 mt-3 mb-1" {...props} />,
+                      p: ({node, ...props}) => <p className="text-indigo-100/90 text-sm mb-3 leading-relaxed" {...props} />,
+                      ul: ({node, ...props}) => <ul className="list-disc list-inside pl-4 mb-3 space-y-1.5" {...props} />,
+                      ol: ({node, ...props}) => <ol className="list-decimal list-inside pl-4 mb-3 space-y-1.5" {...props} />,
+                      li: ({node, ...props}) => <li className="text-indigo-100/90 text-sm" {...props} />,
+                      strong: ({node, ...props}) => <strong className="font-extrabold text-white" {...props} />,
+                    }}
+                  >
+                    {aiAnalysis}
+                  </ReactMarkdown>
                 </div>
               )}
             </div>
@@ -468,7 +579,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             {/* Chart 1: Deadlines timelines comparisons (Pilar 5.2 - Real vs esperado) */}
-            <div className="lg:col-span-8 glass p-6 rounded-3xl shadow-sm flex flex-col gap-4">
+            <div className="lg:col-span-6 glass p-6 rounded-3xl shadow-sm flex flex-col gap-4">
               <div>
                 <h3 className="font-bold text-slate-900 font-display text-sm uppercase tracking-wider">Visão Geral de Prazos (% Real vs % Esperado pelo Tempo)</h3>
                 <p className="text-xs text-slate-400">Verifique os desvios de tempo. O esperado é medido em relação ao tempo corrido.</p>
@@ -489,26 +600,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
               </div>
             </div>
 
-            {/* Chart 2: Resource allocations chart (Pilar 5.4 - Pie Chart) */}
+            {/* Chart 2: Collaborators dynamic monthly allocations percentage chart */}
+            <div className="lg:col-span-6 glass p-6 rounded-3xl shadow-sm flex flex-col gap-4">
+              <div>
+                <h3 className="font-bold text-slate-900 font-display text-sm uppercase tracking-wider">Alocação Mensal dos Colaboradores</h3>
+                <p className="text-xs text-slate-400">Percentual acumulado de dedicação em projetos por mês.</p>
+              </div>
+
+              {collaborators.length === 0 ? (
+                <div className="h-72 flex items-center justify-center border border-dashed border-slate-200 rounded-2xl text-xs text-slate-400 italic">
+                  Nenhum colaborador cadastrado.
+                </div>
+              ) : (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={collaboratorsMonthlyAllocations}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" stroke="#64748b" fontSize={10} tickLine={false} />
+                      <YAxis stroke="#64748b" fontSize={10} tickLine={false} unit="%" />
+                      <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #f1f5f9' }} />
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      {collaborators.map((colab, idx) => {
+                        const colors = [
+                          "#4f46e5", "#10b981", "#f59e0b", "#ef4444", "#3b82f6", 
+                          "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1"
+                        ];
+                        const color = colors[idx % colors.length];
+                        return (
+                          <Bar 
+                            key={colab.id} 
+                            dataKey={colab.nome} 
+                            fill={color} 
+                            radius={[2, 2, 0, 0]} 
+                          />
+                        );
+                      })}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* LOWER ANALYSIS DETAIL GRID ROW */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            {/* Chart 1: RAG Status alignment across All projects */}
             <div className="lg:col-span-4 glass p-6 rounded-3xl shadow-sm flex flex-col gap-4">
               <div>
-                <h3 className="font-bold text-slate-900 font-display text-sm uppercase tracking-wider">Ocupação Logística do Squad</h3>
-                <p className="text-xs text-slate-400">Disponibilidade geral do banco de talentos.</p>
+                <h3 className="font-bold text-slate-900 font-display text-sm uppercase tracking-wider">Farol RAG do Portfólio</h3>
+                <p className="text-xs text-slate-400">Distribuição do status de saúde de todos os projetos ativos.</p>
               </div>
 
               <div className="h-56 relative flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={resourceAllocationChart}
-                      cx="55%"
+                      data={ragSummaryData}
+                      cx="50%"
                       cy="50%"
                       innerRadius={60}
                       outerRadius={80}
                       paddingAngle={5}
                       dataKey="value"
                     >
-                      {resourceAllocationChart.map((entry, index) => (
+                      {ragSummaryData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
@@ -516,27 +672,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
                   </PieChart>
                 </ResponsiveContainer>
 
-                <div className="absolute text-center" style={{ left: "calc(55% - 28px)" }}>
-                  <span className="text-2xl font-extrabold text-slate-900">{resourceAllocationChart[0].value}%</span>
-                  <p className="text-[9px] uppercase font-bold text-slate-400">Ocupado</p>
+                <div className="absolute text-center">
+                  <span className="text-2xl font-extrabold text-slate-900">{projects.length}</span>
+                  <p className="text-[9px] uppercase font-bold text-slate-400">Projetos</p>
                 </div>
               </div>
 
-              <div className="flex justify-around items-center text-xs mt-2 border-t border-slate-100 pt-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
-                  <span className="text-slate-600 font-medium">Alocado ({resourceAllocationChart[0].value}%)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-200" />
-                  <span className="text-slate-600 font-medium">Livre ({resourceAllocationChart[1].value}%)</span>
-                </div>
+              <div className="flex flex-col gap-1.5 text-xs border-t border-slate-100/80 pt-3">
+                {ragSummaryData.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center bg-slate-50/50 p-1 px-2.5 rounded-lg border border-slate-100/40">
+                    <div className="flex items-center gap-1.5">
+                      <span>{item.emoji}</span>
+                      <span className="text-slate-600 font-medium">{item.name}</span>
+                    </div>
+                    <span className="font-bold text-slate-800">{item.value}</span>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-
-          {/* LOWER ANALYSIS DETAIL GRID ROW */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             {/* Metrics column 1: Bugs history trend (Pilar 5.3) */}
             <div className="lg:col-span-4 glass p-6 rounded-3xl shadow-sm space-y-4">
@@ -584,9 +737,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
                 </ResponsiveContainer>
               </div>
             </div>
+          </div>
+
+          {/* LOWER MOST NOTIFICATIONS AND MILESTONE ALERTS WIDGETS ROW */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             {/* Metrics column 3: Defect density and Delivery indices (Pilar 5.5) */}
-            <div className="lg:col-span-4 glass p-6 rounded-3xl shadow-sm space-y-4">
+            <div className="lg:col-span-6 glass p-6 rounded-3xl shadow-sm space-y-4">
               <div>
                 <h3 className="font-bold text-slate-900 font-display text-sm uppercase tracking-wider">Bugs vs Entregas por Módulo</h3>
                 <p className="text-xs text-slate-400">Indicadores de qualidade de software por projeto.</p>
@@ -606,13 +763,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
                 </ResponsiveContainer>
               </div>
             </div>
-          </div>
-
-          {/* LOWER MOST NOTIFICATIONS AND MILESTONE ALERTS WIDGETS ROW */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             {/* Milestone lists */}
-            <div className="glass p-6 rounded-3xl shadow-sm flex flex-col justify-between">
+            <div className="lg:col-span-6 glass p-6 rounded-3xl shadow-sm flex flex-col justify-between">
               <div>
                 <h4 className="font-extrabold text-slate-900 font-display text-xs uppercase tracking-wider mb-3 flex items-center gap-1.5 text-slate-400">
                   <Milestone className="w-3.5 h-3.5" /> Próximas Entregas Críticas no Horizonte
@@ -646,25 +799,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId }) => {
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-
-            {/* QA Testing metrics insight explanation box */}
-            <div className="bg-slate-50 border border-slate-200/50 p-6 rounded-3xl flex flex-col gap-3">
-              <h4 className="font-extrabold font-display text-xs text-slate-400 uppercase tracking-wider">Práticas Recomendadas de Engenharia</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Mantenha seu <strong>PPM KIA Suite</strong> alimentado semanalmente. O índice de <strong>Previsibilidade Ágil (atual: {hoursAndPredictability.predictability}%)</strong> reflete a aderência dos squads ao escopo negociado.
-              </p>
-              
-              <div className="grid grid-cols-2 gap-3 mt-1 text-xs">
-                <div className="p-3 bg-white border border-slate-150 rounded-xl space-y-1">
-                  <span className="font-bold text-slate-800 block">Densidade de Defeitos</span>
-                  <span className="text-slate-500 text-[11px] block leading-relaxed">Taxas de bugs por entrega elevadas indicam a necessidade de robustecer testes unitários e homologações automatizadas.</span>
-                </div>
-                <div className="p-3 bg-white border border-slate-150 rounded-xl space-y-1">
-                  <span className="font-bold text-slate-800 block">Gestão Logística</span>
-                  <span className="text-slate-500 text-[11px] block leading-relaxed">Evite alocações em projetos múltiplos acima de 100% de dedicação para blindar seu time de estafa e queda de vazão.</span>
-                </div>
               </div>
             </div>
           </div>

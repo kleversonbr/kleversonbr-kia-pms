@@ -46,13 +46,22 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     setNotifications((prev) => [newNotif, ...prev]);
 
+    // Auto mark as read (close toast) after 2 seconds
+    setTimeout(() => {
+      markAsRead(newNotif.id);
+    }, 2000);
+
     // HTML5 Push notification
     if (permissionStatus === "granted" && typeof window !== "undefined") {
       try {
-        new Notification(titulo, {
+        const nativeNotif = new Notification(titulo, {
           body: mensagem,
-          icon: "/favicon.ico",
+          icon: "/logo.png",
         });
+        // Auto close native push notification after 2 seconds
+        setTimeout(() => {
+          nativeNotif.close();
+        }, 2000);
       } catch (e) {
         console.error("Erro ao disparar notificação push nativa:", e);
       }

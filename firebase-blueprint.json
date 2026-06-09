@@ -9,10 +9,29 @@
         "nome": { "type": "string" },
         "papel": { "type": "string" },
         "custoHora": { "type": "number" },
+        "squadId": { "type": "string" },
+        "squadNome": { "type": "string" },
         "userId": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["nome", "papel", "userId"]
+    },
+    "squad": {
+      "title": "Squad",
+      "description": "Dados da Squad no portfólio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "tamanho": { "type": "number" },
+        "metaBugs": { "type": "number" },
+        "metaEficiencia": { "type": "number" },
+        "metaAtrasos": { "type": "number" },
+        "metaSla": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["nome", "tamanho", "userId"]
     },
     "projeto": {
       "title": "Projeto",
@@ -26,6 +45,8 @@
         "dataFim": { "type": "string" },
         "estagio": { "type": "string" },
         "progressoManual": { "type": "number" },
+        "squadId": { "type": "string" },
+        "squadNome": { "type": "string" },
         "userId": { "type": "string" },
         "gpEmail": { "type": "string" },
         "createdAt": { "type": "string" }
@@ -88,6 +109,10 @@
     }
   },
   "firestore": {
+    "squads/{squadId}": {
+      "schema": "squad",
+      "description": "Portfólio de squads"
+    },
     "colaboradores/{colaboradorId}": {
       "schema": "colaborador",
       "description": "Banco de talentos do gerente de projetos"

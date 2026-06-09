@@ -7,7 +7,7 @@ import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { ControlViews } from "./components/ControlViews";
 import { ResourceMatrix } from "./components/ResourceMatrix";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { Projeto } from "./types";
+import { Projeto, Squad } from "./types";
 import {
   FolderKanban,
   LayoutDashboard,
@@ -28,6 +28,9 @@ function PPMWorkspaceShell() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [activeTab, setActiveTab] = useState<"dashboard" | "projetos" | "controle" | "recursos">("dashboard");
   const [projectsList, setProjectsList] = useState<Projeto[]>([]);
+  const [squadsList, setSquadsList] = useState<Squad[]>([]);
+  const [filterSquadId, setFilterSquadId] = useState<string>("");
+  const [filterProjectId, setFilterProjectId] = useState<string>("");
   const { addNotification } = useNotifications();
   const [showLoginErrorDetail, setShowLoginErrorDetail] = useState(false);
   const [loginErrorMessage, setLoginErrorMessage] = useState("");
@@ -40,6 +43,34 @@ function PPMWorkspaceShell() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Listen to squads list to feed global dropdown filter
+  useEffect(() => {
+    if (!user) {
+      setSquadsList([]);
+      return;
+    }
+    const q = query(collection(db, "squads"), where("userId", "==", user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Squad[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as Squad);
+      });
+      list.sort((a,b) => a.nome.localeCompare(b.nome));
+      setSquadsList(list);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // If squad filter changes, reset project filter if the selected project is not in that squad
+  useEffect(() => {
+    if (filterSquadId && filterProjectId) {
+      const selectedProj = projectsList.find(p => p.id === filterProjectId);
+      if (selectedProj && selectedProj.squadId !== filterSquadId) {
+        setFilterProjectId("");
+      }
+    }
+  }, [filterSquadId, filterProjectId, projectsList]);
 
   // Listen to projects list to pipe shared properties to modular views like Resource Matrix
   useEffect(() => {
@@ -117,8 +148,8 @@ function PPMWorkspaceShell() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-gradient-to-br from-indigo-200/0 via-teal-300/5 to-transparent blur-3xl -z-10" />
 
         <div className="w-full max-w-md glass border border-slate-200/60 p-8 rounded-3xl shadow-xl flex flex-col items-center text-center gap-6">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shadow-xs border border-indigo-100">
-            <FolderKanban className="w-10 h-10" />
+          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-md flex items-center justify-center bg-white p-1 border border-indigo-100 animate-pulse">
+            <img src="/logo.png" alt="KIA Project Suite Logo" className="w-full h-full object-cover rounded-xl" />
           </div>
 
           <div className="space-y-2">
@@ -173,8 +204,8 @@ function PPMWorkspaceShell() {
         
         {/* Brand name */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-sm">
-            K
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-xs flex items-center justify-center bg-white p-0.5 border border-slate-200/80 shrink-0">
+            <img src="/logo.png" alt="KIA Logo" className="w-full h-full object-cover rounded-lg" />
           </div>
           <div className="flex flex-col">
             <h1 className="text-sm md:text-base font-bold text-slate-800 uppercase tracking-tight leading-none">
@@ -270,7 +301,7 @@ function PPMWorkspaceShell() {
       </header>
 
       {/* Responsive tabs for small screen devices */}
-      <div className="lg:hidden bg-slate-900 border-b border-slate-800 sticky top-0 z-45 shadow flex justify-around p-2 text-[10px] font-bold uppercase select-none print:hidden">
+      <div className="lg:hidden bg-slate-900 border-b border-slate-800 sticky top-16 z-45 shadow flex justify-around p-2 text-[10px] font-bold uppercase select-none print:hidden">
         <button 
           onClick={() => setActiveTab("dashboard")}
           className={`px-3 py-1 rounded-md transition-colors ${activeTab === "dashboard" ? "bg-indigo-600 text-white" : "text-slate-400"}`}
@@ -297,12 +328,100 @@ function PPMWorkspaceShell() {
         </button>
       </div>
 
-      {/* 2. Workspace container area */}
+      {/* 2. Global Portfólio Filter Bar */}
+      <div className="bg-slate-50 border-b border-slate-200 py-3 px-8 flex flex-col sm:flex-row items-center justify-between gap-4 select-none print:hidden">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse shrink-0" />
+          <div>
+            <span className="text-xs font-extrabold uppercase tracking-wide text-slate-700 block">Filtros Ativos</span>
+            <span className="text-[10px] text-slate-400">Filtrar Squad e Projeto em todas as abas</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col xs:flex-row items-center gap-2.5 w-full sm:w-auto">
+          {/* Squad Filter Dropdown */}
+          <div className="flex items-center gap-1.5 w-full xs:w-48 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs hover:border-slate-300 transition-colors">
+            <span className="text-[9px] font-bold text-indigo-700 uppercase tracking-wider shrink-0">Squad:</span>
+            <select
+              value={filterSquadId}
+              onChange={(e) => setFilterSquadId(e.target.value)}
+              className="w-full text-xs bg-transparent border-0 focus:ring-0 focus:outline-none font-semibold text-slate-600 cursor-pointer"
+            >
+              <option value="">Todas</option>
+              {squadsList.map((sq) => (
+                <option key={sq.id} value={sq.id}>
+                  {sq.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Project Filter Dropdown */}
+          <div className="flex items-center gap-1.5 w-full xs:w-56 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs hover:border-slate-300 transition-colors">
+            <span className="text-[9px] font-bold text-indigo-700 uppercase tracking-wider shrink-0">Projeto:</span>
+            <select
+              value={filterProjectId}
+              onChange={(e) => setFilterProjectId(e.target.value)}
+              className="w-full text-xs bg-transparent border-0 focus:ring-0 focus:outline-none font-semibold text-slate-600 cursor-pointer text-ellipsis overflow-hidden"
+            >
+              <option value="">Todos</option>
+              {projectsList
+                .filter((p) => !filterSquadId || p.squadId === filterSquadId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nome}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {/* Clear Filter Button */}
+          {(filterSquadId || filterProjectId) && (
+            <button
+              onClick={() => {
+                setFilterSquadId("");
+                setFilterProjectId("");
+              }}
+              className="text-[10px] font-bold text-rose-600 bg-white hover:bg-rose-50 border border-slate-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              Limpar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Workspace container area */}
       <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
-        {activeTab === "dashboard" && <Dashboard userId={user.uid} />}
-        {activeTab === "projetos" && <ProjectsAdmin userId={user.uid} userEmail={user.email || ""} />}
-        {activeTab === "controle" && <ControlViews userId={user.uid} />}
-        {activeTab === "recursos" && <ResourceMatrix userId={user.uid} projects={projectsList} />}
+        {activeTab === "dashboard" && (
+          <Dashboard 
+            userId={user.uid} 
+            filterSquadId={filterSquadId} 
+            filterProjectId={filterProjectId} 
+          />
+        )}
+        {activeTab === "projetos" && (
+          <ProjectsAdmin 
+            userId={user.uid} 
+            userEmail={user.email || ""} 
+            filterSquadId={filterSquadId} 
+            filterProjectId={filterProjectId} 
+          />
+        )}
+        {activeTab === "controle" && (
+          <ControlViews 
+            userId={user.uid} 
+            filterSquadId={filterSquadId} 
+            filterProjectId={filterProjectId} 
+          />
+        )}
+        {activeTab === "recursos" && (
+          <ResourceMatrix 
+            userId={user.uid} 
+            projects={projectsList} 
+            filterSquadId={filterSquadId} 
+            filterProjectId={filterProjectId} 
+          />
+        )}
       </main>
 
       {/* Footer styled as sleek bottom cockpit */}
