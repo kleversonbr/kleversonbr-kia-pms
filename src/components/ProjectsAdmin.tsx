@@ -127,7 +127,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         setAllocations(list);
       },
       (error) => {
-        console.error("Erro listando alocacoes:", error);
+        handleFirestoreError(error, OperationType.LIST, "alocacoes");
       }
     );
     return () => unsubscribe();
@@ -149,7 +149,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         setSquads(list);
       },
       (error) => {
-        console.error("Erro listando squads:", error);
+        handleFirestoreError(error, OperationType.LIST, "squads");
       }
     );
     return () => unsubscribe();
@@ -178,7 +178,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         setProjectCycles(list);
       },
       (error) => {
-        console.error("Erro listando ciclos:", error);
+        handleFirestoreError(error, OperationType.LIST, `projetos/${selectedProjectId}/ciclos`);
       }
     );
 
@@ -196,7 +196,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         setProjectMilestones(list);
       },
       (error) => {
-        console.error("Erro listando marcos:", error);
+        handleFirestoreError(error, OperationType.LIST, `projetos/${selectedProjectId}/marcos`);
       }
     );
 
@@ -214,7 +214,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
         setProjectRisks(list);
       },
       (error) => {
-        console.error("Erro listando riscos:", error);
+        handleFirestoreError(error, OperationType.LIST, `projetos/${selectedProjectId}/riscos`);
       }
     );
 
@@ -223,7 +223,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
       unsubscribeMilestones();
       unsubscribeRisks();
     };
-  }, [selectedProjectId]);
+  }, [selectedProjectId, userId]);
 
   // Project submission
   const handleSubmitProject = async (e: React.FormEvent) => {
