@@ -123,6 +123,21 @@
         "createdAt": { "type": "string" }
       },
       "required": ["descricao", "impacto", "status", "dataStatus", "userId"]
+    },
+    "tarefa": {
+      "title": "Tarefa",
+      "description": "Tarefa a ser executada vinculada a um projeto",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "descricao": { "type": "string" },
+        "responsavel": { "type": "string" },
+        "dataConclusao": { "type": "string" },
+        "situacao": { "type": "string", "enum": ["Pendente", "Bloqueado", "Em Andamento", "Concluído"] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["descricao", "responsavel", "dataConclusao", "situacao", "userId"]
     }
   },
   "firestore": {
@@ -149,6 +164,10 @@
     "projetos/{projectId}/riscos/{riscoId}": {
       "schema": "risco",
       "description": "Riscos específicos do projeto"
+    },
+    "projetos/{projectId}/tarefas/{tarefaId}": {
+      "schema": "tarefa",
+      "description": "Tarefas específicas do projeto"
     },
     "alocacoes/{alocacaoId}": {
       "schema": "alocacao",

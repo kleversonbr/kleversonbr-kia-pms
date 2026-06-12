@@ -107,3 +107,13 @@ export interface Risco {
   createdAt: string;
 }
 
+export interface Tarefa {
+  id: string;
+  descricao: string;
+  responsavel: string;
+  dataConclusao: string; // YYYY-MM-DD
+  situacao: "Pendente" | "Bloqueado" | "Em Andamento" | "Concluído";
+  userId: string;
+  createdAt: string;
+}
+

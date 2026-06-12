@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus, Users, Layers, ShieldAlert } from "lucide-react";
+import { FolderPlus, Trash, Edit, Calendar, DollarSign, Brain, BarChart2, CheckCircle2, Bookmark, ArrowRight, Clock, Plus, Users, Layers, ShieldAlert, ListTodo, Play, Ban, AlertCircle, CheckSquare } from "lucide-react";
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebaseInit";
-import { Projeto, CicloInput, Marco, Alocacao, Squad, Risco } from "../types";
+import { Projeto, CicloInput, Marco, Alocacao, Squad, Risco, Tarefa } from "../types";
 import { useNotifications } from "./NotificationToast";
 import { calculateExpectedProgress, getRAGDetails } from "./ControlViews";
 import { getSquadColorClasses } from "../utils/squadColors";
@@ -17,7 +17,7 @@ interface ProjectsAdminProps {
 export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail, filterSquadId = "", filterProjectId = "" }) => {
   const [projects, setProjects] = useState<Projeto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"cadastros" | "ciclos" | "marcos" | "riscos">("cadastros");
+  const [activeTab, setActiveTab] = useState<"cadastros" | "ciclos" | "marcos" | "riscos" | "tarefas">("cadastros");
   const { addNotification } = useNotifications();
 
   // Filtered project list based on selected portfolio filters
@@ -56,6 +56,7 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
   const [projectCycles, setProjectCycles] = useState<CicloInput[]>([]);
   const [projectMilestones, setProjectMilestones] = useState<Marco[]>([]);
   const [projectRisks, setProjectRisks] = useState<Risco[]>([]);
+  const [projectTasks, setProjectTasks] = useState<Tarefa[]>([]);
   const [allocations, setAllocations] = useState<Alocacao[]>([]);
 
   // Risk Input State
@@ -66,6 +67,13 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
   const [riskStatusDate, setRiskStatusDate] = useState(new Date().toISOString().split("T")[0]);
   const [riskOwner, setRiskOwner] = useState("");
   const [editingRiskId, setEditingRiskId] = useState<string | null>(null);
+
+  // Task Input State
+  const [taskDesc, setTaskDesc] = useState("");
+  const [taskOwner, setTaskOwner] = useState("");
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [taskStatus, setTaskStatus] = useState<"Pendente" | "Bloqueado" | "Em Andamento" | "Concluído">("Pendente");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   // Cycle Input State
   const [cyNome, setCyNome] = useState("");
@@ -155,12 +163,13 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     return () => unsubscribe();
   }, [userId]);
 
-  // Load details (Cycles, Milestones and Risks) for the selected project
+  // Load details (Cycles, Milestones, Risks and Tasks) for the selected project
   useEffect(() => {
     if (!selectedProjectId) {
       setProjectCycles([]);
       setProjectMilestones([]);
       setProjectRisks([]);
+      setProjectTasks([]);
       return;
     }
 
@@ -218,10 +227,29 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
       }
     );
 
+    // Tasks snapshot
+    const tasksQuery = query(collection(db, "projetos", selectedProjectId, "tarefas"), where("userId", "==", userId));
+    const unsubscribeTasks = onSnapshot(
+      tasksQuery,
+      (snapshot) => {
+        const list: Tarefa[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Tarefa);
+        });
+        // Sort chronologically by createdAt descending
+        list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        setProjectTasks(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, `projetos/${selectedProjectId}/tarefas`);
+      }
+    );
+
     return () => {
       unsubscribeCycles();
       unsubscribeMilestones();
       unsubscribeRisks();
+      unsubscribeTasks();
     };
   }, [selectedProjectId, userId]);
 
@@ -595,6 +623,82 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
     }
   };
 
+  // Tasks (Tarefas) CRUD
+  const handleSubmitTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProjectId) return;
+    if (!taskDesc.trim() || !taskOwner.trim() || !taskDueDate) {
+      addNotification("Aviso", "Preencha todos os campos obrigatórios para a tarefa.", "warning");
+      return;
+    }
+
+    try {
+      if (editingTaskId) {
+        // Edit Mode
+        await updateDoc(doc(db, "projetos", selectedProjectId, "tarefas", editingTaskId), {
+          descricao: taskDesc,
+          responsavel: taskOwner,
+          dataConclusao: taskDueDate,
+          situacao: taskStatus,
+          userId,
+        });
+
+        addNotification("Tarefa Atualizada ✅", `A tarefa foi atualizada com sucesso.`, "success");
+        setEditingTaskId(null);
+      } else {
+        // Create Mode
+        await addDoc(collection(db, "projetos", selectedProjectId, "tarefas"), {
+          descricao: taskDesc,
+          responsavel: taskOwner,
+          dataConclusao: taskDueDate,
+          situacao: taskStatus,
+          userId,
+          createdAt: new Date().toISOString(),
+        });
+
+        addNotification("Tarefa Adicionada ✅", `A tarefa foi criada com sucesso no projeto.`, "success");
+      }
+
+      // Reset form states
+      setTaskDesc("");
+      setTaskOwner("");
+      setTaskDueDate("");
+      setTaskStatus("Pendente");
+    } catch (err) {
+      console.error("Erro ao salvar tarefa:", err);
+      addNotification("Erro", "Não foi possível salvar a tarefa.", "error");
+    }
+  };
+
+  const handleEditTask = (task: Tarefa) => {
+    setEditingTaskId(task.id);
+    setTaskDesc(task.descricao);
+    setTaskOwner(task.responsavel);
+    setTaskDueDate(task.dataConclusao);
+    setTaskStatus(task.situacao);
+  };
+
+  const handleCancelEditTask = () => {
+    setEditingTaskId(null);
+    setTaskDesc("");
+    setTaskOwner("");
+    setTaskDueDate("");
+    setTaskStatus("Pendente");
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await deleteDoc(doc(db, "projetos", selectedProjectId, "tarefas", taskId));
+      addNotification("Tarefa Removida", `A tarefa foi excluída do projeto.`, "info");
+      if (editingTaskId === taskId) {
+        handleCancelEditTask();
+      }
+    } catch (err) {
+      console.error("Erro ao apagar tarefa:", err);
+      addNotification("Erro", "Não foi possível remover a tarefa.", "error");
+    }
+  };
+
   const getImpactBadge = (impact: string) => {
     switch (impact) {
       case "Baixo":
@@ -939,6 +1043,18 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
               >
                 <ShieldAlert className="w-4 h-4" />
                 Gestão de Riscos
+              </button>
+
+              <button
+                onClick={() => setActiveTab("tarefas")}
+                className={`flex-1 py-3.5 px-6 font-display font-semibold text-sm border-b-2 transition-all flex items-center justify-center gap-2 ${
+                  activeTab === "tarefas"
+                    ? "border-indigo-600 text-indigo-600 bg-indigo-50/10"
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
+                }`}
+              >
+                <ListTodo className="w-4 h-4" />
+                Tarefas do Projeto
               </button>
             </div>
 
@@ -1580,6 +1696,200 @@ export const ProjectsAdmin: React.FC<ProjectsAdminProps> = ({ userId, userEmail,
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: TASK MANAGEMENT (GESTÃO DE TAREFAS) */}
+              {activeTab === "tarefas" && (
+                <div className="space-y-6 animate-fade-in font-display">
+                  
+                  {/* Warning / explanation banner */}
+                  <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl flex items-start gap-3">
+                    <ListTodo className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm">Controle de Tarefas do Projeto</h4>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                        Crie, atualize status e gerencie todas as tarefas pendentes, andamento, concluídas ou bloqueadas vinculadas a este projeto de forma ágil e centralizada.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Form Create / Edit Task */}
+                  <form onSubmit={handleSubmitTask} className="bg-slate-50 p-5 rounded-2xl border border-slate-200/60 space-y-4">
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      {editingTaskId ? "✏️ Editar Tarefa" : "➕ Adicionar Nova Tarefa"}
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                      {/* Descricao */}
+                      <div className="col-span-12 md:col-span-4">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Descrição da Tarefa <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={taskDesc}
+                          onChange={(e) => setTaskDesc(e.target.value)}
+                          placeholder="Ex: Realizar testes automatizados de integração"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+
+                      {/* Responsavel */}
+                      <div className="col-span-12 md:col-span-3">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Responsável (Colaborador) <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={taskOwner}
+                          onChange={(e) => setTaskOwner(e.target.value)}
+                          placeholder="Ex: Carlos SM ou Nome do Colaborador"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+
+                      {/* Data para Conclusao */}
+                      <div className="col-span-12 md:col-span-3">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Data para Conclusão <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={taskDueDate}
+                          onChange={(e) => setTaskDueDate(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+
+                      {/* Situacao */}
+                      <div className="col-span-12 md:col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Situação <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          required
+                          value={taskStatus}
+                          onChange={(e) => setTaskStatus(e.target.value as any)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-semibold text-slate-700"
+                        >
+                          <option value="Pendente">⏳ Pendente</option>
+                          <option value="Bloqueado">🚫 Bloqueado</option>
+                          <option value="Em Andamento">⚡ Em Andamento</option>
+                          <option value="Concluído">✅ Concluído</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      {editingTaskId && (
+                        <button
+                          type="button"
+                          onClick={handleCancelEditTask}
+                          className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-all"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="py-2 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5" />
+                        {editingTaskId ? "Atualizar Tarefa" : "Salvar Tarefa"}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Tasks List */}
+                  <div className="space-y-3">
+                    <h3 className="font-bold text-slate-900 font-display text-base uppercase tracking-wider">
+                      Lista de Tarefas Cadastradas ({projectTasks.length})
+                    </h3>
+
+                    {projectTasks.length === 0 ? (
+                      <div className="border border-dashed border-slate-200 text-center py-12 text-slate-400 rounded-2xl text-xs">
+                        Nenhuma tarefa cadastrada para este projeto. Use o formulário acima para registrar novas tarefas.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-slate-100/80 rounded-2xl shadow-xs bg-white">
+                        <table className="w-full border-collapse bg-white text-left text-xs text-slate-500">
+                          <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-100">
+                            <tr>
+                              <th scope="col" className="px-6 py-4 font-semibold">Descrição da Tarefa</th>
+                              <th scope="col" className="px-6 py-4 font-semibold">Responsável</th>
+                              <th scope="col" className="px-6 py-4 font-semibold">Data Limite</th>
+                              <th scope="col" className="px-6 py-4 font-semibold">Situação</th>
+                              <th scope="col" className="px-6 py-4 font-semibold text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 border-t border-slate-100">
+                            {projectTasks.map((task) => {
+                              let statusColor = "";
+                              let statusIcon = null;
+
+                              if (task.situacao === "Pendente") {
+                                statusColor = "bg-amber-50 text-amber-700 border-amber-200";
+                                statusIcon = <Clock className="w-3.5 h-3.5 text-amber-500" />;
+                              } else if (task.situacao === "Bloqueado") {
+                                statusColor = "bg-rose-50 text-rose-700 border-rose-200";
+                                statusIcon = <Ban className="w-3.5 h-3.5 text-rose-500" />;
+                              } else if (task.situacao === "Em Andamento") {
+                                statusColor = "bg-sky-50 text-sky-700 border-sky-200";
+                                statusIcon = <Play className="w-3.5 h-3.5 text-sky-500 fill-current" />;
+                              } else if (task.situacao === "Concluído") {
+                                statusColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                                statusIcon = <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />;
+                              }
+
+                              return (
+                                <tr key={task.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="px-6 py-4 font-medium text-slate-900 max-w-sm whitespace-normal break-words">
+                                    {task.descricao}
+                                  </td>
+                                  <td className="px-6 py-4 font-semibold text-slate-700">
+                                    {task.responsavel}
+                                  </td>
+                                  <td className="px-6 py-4 font-mono text-slate-600 font-semibold whitespace-nowrap">
+                                    {task.dataConclusao ? task.dataConclusao.split("-").reverse().join("/") : ""}
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 border rounded-lg text-xs font-bold leading-none ${statusColor}`}>
+                                      {statusIcon}
+                                      {task.situacao}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditTask(task)}
+                                        className="p-1 px-2.5 text-xs text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200/55 rounded-lg transition-all flex items-center gap-1 font-semibold cursor-pointer"
+                                        title="Editar Tarefa"
+                                      >
+                                        <Edit className="w-3.5 h-3.5" /> Editar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteTask(task.id)}
+                                        className="p-1 px-2.5 text-xs text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/55 rounded-lg transition-all flex items-center gap-1 font-semibold cursor-pointer"
+                                        title="Excluir Tarefa"
+                                      >
+                                        <Trash className="w-3.5 h-3.5" /> Excluir
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>

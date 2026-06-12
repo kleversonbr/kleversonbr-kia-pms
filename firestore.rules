@@ -84,6 +84,18 @@ service cloud.firestore {
                              && request.resource.data.userId == request.auth.uid;
         allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
       }
+
+      // Subcollection: Tarefas
+      match /tarefas/{tarefaId} {
+        allow read: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+        allow create: if isSignedIn() 
+                             && request.resource.data.userId == request.auth.uid
+                             && isValidId(tarefaId);
+        allow update: if isSignedIn() 
+                             && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid)
+                             && request.resource.data.userId == request.auth.uid;
+        allow delete: if isSignedIn() && (resource == null || !("userId" in resource.data) || resource.data.userId == request.auth.uid);
+      }
     }
 
     // 3. Alocacoes
